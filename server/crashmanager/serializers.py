@@ -50,7 +50,12 @@ class CrashEntrySerializer(serializers.ModelSerializer):
         if missing_keys:
             raise InvalidArgumentException({key: ["This field is required."] for key in missing_keys})
 
-        attrs['product'] = Product.objects.get_or_create(**attrs['product'])[0]
+        # If mozilla-central is not the only product name
+        try:
+            attrs['product'] = Product.objects.get_or_create(**attrs['product'])[0]
+        except Product.MultipleObjectsReturned:
+            attrs['product'] = Product.objects.filter(**attrs['product']).order_by('id').first()
+
         attrs['platform'] = Platform.objects.get_or_create(**attrs['platform'])[0]
         attrs['os'] = OS.objects.get_or_create(**attrs['os'])[0]
         attrs['client'] = Client.objects.get_or_create(**attrs['client'])[0]

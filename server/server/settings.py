@@ -36,8 +36,8 @@ except:
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ['*']
+DATA_UPLOAD_MAX_MEMORY_SIZE = 26214400
 
 # Application definition
 
@@ -122,19 +122,24 @@ WSGI_APPLICATION = 'server.wsgi.application'
 # https://docs.djangoproject.com/en/1.6/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
-    }
+#    'default': {
+#        'ENGINE': 'django.db.backends.sqlite3',
+#        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+#    }
 
 # For a production setup, we recommend to not use sqlite
 # but instead a real database like MySQL or Postgres.
-#    'default': {
-#        'ENGINE': 'django.db.backends.mysql',
-#        'OPTIONS': {
-#            'read_default_file': '/path/to/my.cnf',
-#        },
-#    }
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'fuzzmanager',
+        'USER': 'root',
+        'PASSWORD': 'azimuth',
+        'HOST': 'mysql',
+        'PORT': '3306',
+        'OPTIONS': {
+            'read_default_file': '/etc/mysql/mysql.cnf',
+        },
+    }
 }
 
 # Internationalization
