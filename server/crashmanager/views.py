@@ -36,7 +36,9 @@ def check_authorized_for_signature(request, signature):
         if not defaultToolsFilter:
             raise PermissionDenied({ "message" : "You don't have permission to access this signature." })
 
-        entries = CrashEntry.objects.filter(bucket=signature).filter(reduce(operator.or_, [Q(("tool", x)) for x in defaultToolsFilter]))
+        entries = CrashEntry.objects.filter(bucket=signature)
+        entries = CrashEntry.deferRawFields(entries)
+        entries = entries.filter(reduce(operator.or_, [Q(("tool", x)) for x in defaultToolsFilter]))
         if not entries:
             raise PermissionDenied({ "message" : "You don't have permission to access this signature." })
 
@@ -123,6 +125,7 @@ def stats(request):
     lastHourDelta = timezone.now() - timedelta(hours=1)
     print(lastHourDelta)
     entries = CrashEntry.objects.filter(created__gt=lastHourDelta).select_related('bucket')
+    entries = CrashEntry.deferRawFields(entries)
     entries = filter_crash_entries_by_toolfilter(request, entries, restricted_only=True)
 
     bucketFrequencyMap = {}
@@ -152,6 +155,7 @@ def settings(request):
 def allSignatures(request):
     entries = Bucket.objects.annotate(size=Count('crashentry'), quality=Min('crashentry__testcase__quality')).order_by('-id')
     entries = filter_signatures_by_toolfilter(request, entries, restricted_only=True)
+    entries = entries.select_related('bug', 'bug__externalType')
     return render(request, 'signatures/index.html', { 'isAll': True, 'siglist' : entries })
 
 @login_required(login_url='/login/')
@@ -226,6 +230,7 @@ def bucketWatchCrashes(request, sigid):
     bucket = get_object_or_404(Bucket, pk=sigid)
     watch = get_object_or_404(BucketWatch, user=user, bucket=bucket)
     entries = CrashEntry.objects.all().order_by('-id').filter(bucket=bucket, id__gt=watch.lastCrash)
+    entries = CrashEntry.deferRawFields(entries)
     entries = filter_crash_entries_by_toolfilter(request, entries)
     latestCrash = CrashEntry.objects.aggregate(latest=Max('id'))['latest']
 
@@ -280,6 +285,8 @@ def signatures(request):
 
     # Annotate size and quality to each bucket that we're going to display.
     entries = entries.annotate(size=Count('crashentry'), quality=Min('crashentry__testcase__quality'))
+
+    entries = entries.select_related('bug', 'bug__externalType')
 
     data = { 'q' : q, 'request' : request, 'isSearch' : isSearch, 'siglist' : entries }
     return render(request, 'signatures/index.html', data)
@@ -336,6 +343,7 @@ def crashes(request, ignore_toolfilter=False):
 
     entries = entries.filter(**filters)
     entries = entries.select_related('bucket', 'tool', 'os', 'product', 'platform', 'testcase')
+    entries = CrashEntry.deferRawFields(entries)
 
     data = {
             'q' : q,
@@ -372,6 +380,7 @@ def queryCrashes(request):
 
     if query:
         entries = CrashEntry.objects.all().order_by('-id').filter(query)
+        entries = CrashEntry.deferRawFields(entries)
         entries = filter_crash_entries_by_toolfilter(request, entries)
 
     # Re-get the lines as we might have reformatted
@@ -505,6 +514,10 @@ def __handleSignaturePost(request, bucket):
         entries = entries.select_related('product', 'platform', 'os')  # these are used by getCrashInfo
         if needTest:
             entries = entries.select_related('testcase')
+
+        requiredOutputs = signature.getRequiredOutputSources()
+        entries = CrashEntry.deferRawFields(entries, requiredOutputs)
+
         if not submitSave:
             entries = entries.select_related('tool').order_by('-id')  # used by the preview list
 
@@ -517,7 +530,7 @@ def __handleSignaturePost(request, bucket):
                 break
             entriesOffset += 100
             for entry in entriesChunk:
-                match = signature.matches(entry.getCrashInfo(attachTestcase=needTest))
+                match = signature.matches(entry.getCrashInfo(attachTestcase=needTest, requiredOutputSources=requiredOutputs))
                 if match and entry.bucket_id is None:
                     if submitSave:
                         inList.append(entry.pk)
@@ -783,6 +796,9 @@ def optimizeSignature(request, sigid):
     if signature.matchRequiresTest():
         entries.select_related("testcase")
 
+    requiredOutputs = signature.getRequiredOutputSources()
+    entries = CrashEntry.deferRawFields(entries, requiredOutputs)
+
     optimizedSignature = None
     matchingEntries = []
 
@@ -791,7 +807,7 @@ def optimizeSignature(request, sigid):
     firstEntryPerBucketCache = {}
 
     for entry in entries:
-        entry.crashinfo = entry.getCrashInfo(attachTestcase=signature.matchRequiresTest())
+        entry.crashinfo = entry.getCrashInfo(attachTestcase=signature.matchRequiresTest(), requiredOutputSources=requiredOutputs)
 
         # For optimization, disregard any issues that directly match since those could be
         # incoming new issues and we don't want these to block the optimization.
@@ -811,11 +827,13 @@ def optimizeSignature(request, sigid):
                     continue
 
                 if not otherBucket.pk in firstEntryPerBucketCache:
-                    c = CrashEntry.objects.filter(bucket=otherBucket).select_related("product", "platform", "os").first()
+                    c = CrashEntry.objects.filter(bucket=otherBucket).select_related("product", "platform", "os")
+                    c = CrashEntry.deferRawFields(c, requiredOutputs)
+                    c = c.first()
                     firstEntryPerBucketCache[otherBucket.pk] = c
                     if c:
                         # Omit testcase for performance reasons for now
-                        firstEntryPerBucketCache[otherBucket.pk] = c.getCrashInfo(attachTestcase=False)
+                        firstEntryPerBucketCache[otherBucket.pk] = c.getCrashInfo(attachTestcase=False, requiredOutputSources=requiredOutputs)
 
                 firstEntryCrashInfo = firstEntryPerBucketCache[otherBucket.pk]
                 if firstEntryCrashInfo:
@@ -830,7 +848,7 @@ def optimizeSignature(request, sigid):
                 optimizedSignature = None
             else:
                 for otherEntry in entries:
-                    if optimizedSignature.matches(otherEntry.getCrashInfo(attachTestcase=False)):
+                    if optimizedSignature.matches(otherEntry.getCrashInfo(attachTestcase=False, requiredOutputSources=requiredOutputs)):
                         matchingEntries.append(otherEntry)
 
                 # Fallback for when the optimization algorithm failed for some reason
@@ -1166,7 +1184,6 @@ class BucketAnnotateFilterBackend(filters.BaseFilterBackend):
         return queryset.annotate(size=Count('crashentry'), quality=Min('crashentry__testcase__quality'))
 
 class CrashEntryViewSet(mixins.CreateModelMixin,
-                        mixins.ListModelMixin,
                         mixins.RetrieveModelMixin,
                         viewsets.GenericViewSet):
     """
@@ -1176,6 +1193,30 @@ class CrashEntryViewSet(mixins.CreateModelMixin,
     queryset = CrashEntry.objects.all().select_related('product', 'platform', 'os', 'client', 'tool', 'testcase')
     serializer_class = CrashEntrySerializer
     filter_backends = [JsonQueryFilterBackend]
+
+    def list(self, request, *args, **kwargs):
+        """
+        Based on ListModelMixin.list()
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+
+        include_raw = request.query_params.get('include_raw', '1')
+        try:
+            include_raw = int(include_raw)
+            assert include_raw in {0, 1}
+        except (AssertionError, ValueError):
+            raise InvalidArgumentException({'include_raw': ['Expecting 0 or 1.']})
+
+        if not include_raw:
+            queryset = queryset.defer('rawStdout', 'rawStderr', 'rawCrashData')
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, include_raw=include_raw, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, include_raw=include_raw, many=True)
+        return Response(serializer.data)
 
     def partial_update(self, request, pk=None):
         """

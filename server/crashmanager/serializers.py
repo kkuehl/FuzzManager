@@ -29,15 +29,25 @@ class CrashEntrySerializer(serializers.ModelSerializer):
     testcase_quality = serializers.IntegerField(source='testcase.quality', required=False, default=0)
     testcase_isbinary = serializers.BooleanField(source='testcase.isBinary', required=False, default=False)
 
+    def __init__(self, *args, **kwargs):
+
+        include_raw = kwargs.pop('include_raw', True)
+
+        super(CrashEntrySerializer, self).__init__(*args, **kwargs)
+
+        if not include_raw:
+            for field_name in ('rawCrashData', 'rawStdout', 'rawStderr'):
+                self.fields.pop(field_name)
+
     class Meta:
         model = CrashEntry
         fields = (
                   'rawStdout', 'rawStderr', 'rawCrashData', 'metadata',
                   'testcase', 'testcase_ext', 'testcase_quality', 'testcase_isbinary',
                   'platform', 'product', 'product_version', 'os', 'client', 'tool',
-                  'env', 'args', 'bucket', 'id'
+                  'env', 'args', 'bucket', 'id', 'shortSignature', 'crashAddress',
                   )
-        read_only_fields = ('bucket', 'id')
+        read_only_fields = ('bucket', 'id', 'shortSignature', 'crashAddress')
 
     def create(self, attrs):
         '''

@@ -195,7 +195,8 @@ class RestCrashesTests(APITestCase, TestCase):
         resp = resp['results'][0]
         self.assertEqual(set(resp.keys()), {'args', 'bucket', 'client', 'env', 'id', 'metadata', 'os', 'platform',
                                             'product', 'product_version', 'rawCrashData', 'rawStderr', 'rawStdout',
-                                            'testcase', 'testcase_isbinary', 'testcase_quality', 'tool'})
+                                            'testcase', 'testcase_isbinary', 'testcase_quality', 'tool',
+                                            'shortSignature', 'crashAddress'})
         for key, value in resp.items():
             if key == "testcase":
                 continue
@@ -206,6 +207,47 @@ class RestCrashesTests(APITestCase, TestCase):
                      "testcase_isbinary": "testcase_isBinary",
                      "tool": "tool_name"}.get(key, key)
             result = crashes[3]
+            for attr in attrs.split("_"):
+                result = getattr(result, attr)
+            self.assertEqual(value, result)
+
+    def test_list_noraw(self):
+        """test that crashes can be listed without raw fields"""
+        testcase = self.create_testcase("test1.txt", quality=5)
+        crash = self.create_crash(shortSignature="crash #1",
+                                  client="client #1",
+                                  os="os #1",
+                                  product="product #1",
+                                  product_version="1",
+                                  platform="platform #1",
+                                  tool="tool1",
+                                  bucket=None,
+                                  testcase=testcase)
+        user = User.objects.get(username='test')
+        self.client.force_authenticate(user=user)
+        resp = self.client.get('/crashmanager/rest/crashes/', {'include_raw': '0'})
+        log.debug(resp)
+        self.assertEqual(resp.status_code, requests.codes['ok'])
+        resp = json.loads(resp.content)
+        self.assertEqual(set(resp.keys()), {'count', 'next', 'previous', 'results'})
+        self.assertEqual(resp['count'], 1)
+        self.assertEqual(resp['next'], None)
+        self.assertEqual(resp['previous'], None)
+        self.assertEqual(len(resp['results']), 1)
+        resp = resp['results'][0]
+        self.assertEqual(set(resp.keys()), {'args', 'bucket', 'client', 'env', 'id', 'metadata', 'os', 'platform',
+                                            'product', 'product_version', 'testcase', 'testcase_isbinary',
+                                            'testcase_quality', 'tool', 'shortSignature', 'crashAddress'})
+        for key, value in resp.items():
+            if key == "testcase":
+                continue
+            attrs = {"client": "client_name",
+                     "os": "os_name",
+                     "platform": "platform_name",
+                     "product": "product_name",
+                     "testcase_isbinary": "testcase_isBinary",
+                     "tool": "tool_name"}.get(key, key)
+            result = crash
             for attr in attrs.split("_"):
                 result = getattr(result, attr)
             self.assertEqual(value, result)
@@ -275,7 +317,8 @@ class RestCrashTests(APITestCase, TestCase):
         resp = json.loads(resp.content)
         self.assertEqual(set(resp.keys()), {'args', 'bucket', 'client', 'env', 'id', 'metadata', 'os', 'platform',
                                             'product', 'product_version', 'rawCrashData', 'rawStderr', 'rawStdout',
-                                            'testcase', 'testcase_isbinary', 'testcase_quality', 'tool'})
+                                            'testcase', 'testcase_isbinary', 'testcase_quality', 'tool',
+                                            'shortSignature', 'crashAddress'})
         for key, value in resp.items():
             if key == "testcase":
                 continue
@@ -307,7 +350,8 @@ class RestCrashTests(APITestCase, TestCase):
                                   tool="tool #1",
                                   testcase=test)
         fields = {'args', 'bucket', 'client', 'env', 'id', 'metadata', 'os', 'platform', 'product', 'product_version',
-                  'rawCrashData', 'rawStderr', 'rawStdout', 'testcase', 'testcase_isbinary', 'tool'}
+                  'rawCrashData', 'rawStderr', 'rawStdout', 'testcase', 'testcase_isbinary', 'tool',
+                  'shortSignature', 'crashAddress'}
         for field in fields:
             resp = self.client.patch('/crashmanager/rest/crashes/%d/' % crash.pk, {field: ""})
             log.debug(resp)
