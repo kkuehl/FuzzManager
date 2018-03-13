@@ -3,6 +3,7 @@ from django.utils.safestring import mark_safe
 
 register = template.Library()
 
+
 class RecurseConfigTree(template.Node):
     def __init__(self, template_nodes, config_var):
         self.template_nodes = template_nodes
@@ -21,11 +22,12 @@ class RecurseConfigTree(template.Node):
     def render(self, context):
         return self._render_node(context, self.config_var.resolve(context))
 
+
 @register.tag
 def recurseconfig(parser, token):
     bits = token.contents.split()
     if len(bits) != 2:
-        raise template.TemplateSyntaxError(_('%s tag requires a start configuration') % bits[0])
+        raise template.TemplateSyntaxError(_('%s tag requires a start configuration') % bits[0])  # noqa
 
     config_var = template.Variable(bits[1])
 

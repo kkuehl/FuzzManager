@@ -23,6 +23,7 @@ from django.utils import timezone
 # until we found a better way to deal with this situation.
 zone_blacklist = ["us-east-1a", "us-east-1f"]
 
+
 # This function must be defined at the module level so it can be pickled
 # by the multiprocessing module when calling this asynchronously.
 def get_spot_price_per_region(region_name, aws_key_id, aws_secret_key, instance_type):
@@ -30,18 +31,19 @@ def get_spot_price_per_region(region_name, aws_key_id, aws_secret_key, instance_
     now = timezone.now()
     start = now - datetime.timedelta(hours=6)
     region = boto.ec2.connect_to_region(region_name,
-                                   aws_access_key_id=aws_key_id,
-                                   aws_secret_access_key=aws_secret_key
-                                   )
+                                        aws_access_key_id=aws_key_id,
+                                        aws_secret_access_key=aws_secret_key
+                                        )
 
     if not region:
         raise RuntimeError("Invalid region: %s" % region_name)
 
     r = region.get_spot_price_history(start_time=start.isoformat(),
-                                    instance_type=instance_type,
-                                    product_description="Linux/UNIX"
-                                    )  # TODO: Make configurable
+                                      instance_type=instance_type,
+                                      product_description="Linux/UNIX"
+                                      )  # TODO: Make configurable
     return r
+
 
 def get_spot_prices(regions, aws_key_id, aws_secret_key, instance_type, use_multiprocess=False):
     if use_multiprocess:
@@ -61,7 +63,7 @@ def get_spot_prices(regions, aws_key_id, aws_secret_key, instance_type, use_mult
         if use_multiprocess:
             result = result.get()
         for entry in result:
-            if not entry.region.name in prices:
+            if entry.region.name not in prices:
                 prices[entry.region.name] = {}
 
             zone = entry.availability_zone
@@ -69,16 +71,17 @@ def get_spot_prices(regions, aws_key_id, aws_secret_key, instance_type, use_mult
             if zone in zone_blacklist:
                 continue
 
-            if not zone in prices[entry.region.name]:
+            if zone not in prices[entry.region.name]:
                 prices[entry.region.name][zone] = []
 
             prices[entry.region.name][zone].append(entry.price)
 
     return prices
 
+
 def get_price_median(data):
     sdata = sorted(data)
     n = len(sdata)
     if not n % 2:
-        return (sdata[n / 2] + sdata[n / 2 - 1]) / 2.0
-    return sdata[n / 2]
+        return (sdata[n // 2] + sdata[n // 2 - 1]) / 2.0
+    return sdata[n // 2]

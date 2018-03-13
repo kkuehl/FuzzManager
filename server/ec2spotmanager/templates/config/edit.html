@@ -74,9 +74,9 @@
              value="{{ config.ec2_security_groups_list|listcsv }}">
       <br/>
 
-      <label for="id_ec2_instance_type">EC2 Instance Type</label><br/>
-      <input id="id_ec2_instance_type" class="form-control" name="ec2_instance_type" type="text"
-             value="{{ config.ec2_instance_type|default:"" }}">
+      <label for="id_ec2_instance_types">EC2 Instance Types</label><br/>
+      <input id="id_ec2_instance_types" class="form-control" name="ec2_instance_types" type="text"
+             value="{{ config.ec2_instance_types_list|listcsv }}">
       <br/>
 
       <label for="id_ec2_image_name">EC2 Image Name</label><br/>
@@ -87,6 +87,13 @@
       <label for="id_ec2_userdata">EC2 Userdata Script</label><br/>
       <textarea id="id_ec2_userdata" class="form-control" name="ec2_userdata"
                 spellcheck='false'>{{ config.ec2_userdata|default:"" }}</textarea>
+      <br/>
+
+      <fieldset class="ec2-radio-group">
+      <legend>EC2 Userdata Script Line Endings</legend>
+      <label><input type="radio" name="ec2_userdata_ff" value="unix"{% if userdata_ff == 'unix' %} checked="checked"{% endif %}> Unix</label>
+      <label><input type="radio" name="ec2_userdata_ff" value="dos"{% if userdata_ff == 'dos' %} checked="checked"{% endif %}> DOS</label>
+      </fieldset>
       <br/>
 
       <label for="id_ec2_userdata_macros">EC2 Userdata Macros</label><br/>

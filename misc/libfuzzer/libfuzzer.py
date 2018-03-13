@@ -30,9 +30,10 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 FTB_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
 sys.path += [FTB_PATH]
 
-from Collector.Collector import Collector
-from FTB.ProgramConfiguration import ProgramConfiguration
-from FTB.Signatures.CrashInfo import CrashInfo
+from Collector.Collector import Collector  # noqa
+from FTB.ProgramConfiguration import ProgramConfiguration  # noqa
+from FTB.Signatures.CrashInfo import CrashInfo  # noqa
+
 
 class LibFuzzerMonitor(threading.Thread):
     def __init__(self, fd):
@@ -80,6 +81,7 @@ __version__ = 0.1
 __date__ = '2016-07-28'
 __updated__ = '2016-07-28'
 
+
 def main(argv=None):
     '''Command line options.'''
 
@@ -97,27 +99,35 @@ def main(argv=None):
 
     mainGroup = parser.add_argument_group(title="Main arguments", description=None)
     fmGroup = parser.add_argument_group(title="FuzzManager specific options",
-                              description="""Values for the options listed here are typically
-                                          provided through FuzzManager configuration files,
-                                          but can be overwritten using these options:""")
+                                        description="""Values for the options listed here are typically
+                                                    provided through FuzzManager configuration files,
+                                                    but can be overwritten using these options:""")
 
     mainGroup.add_argument('--version', action='version', version=program_version_string)
     mainGroup.add_argument('--cmd', dest='cmd', action='store_true', help="Command with parameters to run")
-    mainGroup.add_argument('--env', dest='env', nargs='+', type=str, help="List of environment variables in the form 'KEY=VALUE'")
+    mainGroup.add_argument('--env', dest='env', nargs='+', type=str,
+                           help="List of environment variables in the form 'KEY=VALUE'")
 
     # Settings
     fmGroup.add_argument("--sigdir", dest="sigdir", help="Signature cache directory", metavar="DIR")
-    fmGroup.add_argument("--serverhost", dest="serverhost", help="Server hostname for remote signature management", metavar="HOST")
+    fmGroup.add_argument("--serverhost", dest="serverhost", help="Server hostname for remote signature management",
+                         metavar="HOST")
     fmGroup.add_argument("--serverport", dest="serverport", type=int, help="Server port to use", metavar="PORT")
-    fmGroup.add_argument("--serverproto", dest="serverproto", help="Server protocol to use (default is https)", metavar="PROTO")
-    fmGroup.add_argument("--serverauthtokenfile", dest="serverauthtokenfile", help="File containing the server authentication token", metavar="FILE")
+    fmGroup.add_argument("--serverproto", dest="serverproto", help="Server protocol to use (default is https)",
+                         metavar="PROTO")
+    fmGroup.add_argument("--serverauthtokenfile", dest="serverauthtokenfile",
+                         help="File containing the server authentication token", metavar="FILE")
     fmGroup.add_argument("--clientid", dest="clientid", help="Client ID to use when submitting issues", metavar="ID")
-    fmGroup.add_argument("--platform", dest="platform", help="Platform this crash appeared on", metavar="(x86|x86-64|arm)")
+    fmGroup.add_argument("--platform", dest="platform",
+                         help="Platform this crash appeared on", metavar="(x86|x86-64|arm)")
     fmGroup.add_argument("--product", dest="product", help="Product this crash appeared on", metavar="PRODUCT")
-    fmGroup.add_argument("--productversion", dest="product_version", help="Product version this crash appeared on", metavar="VERSION")
-    fmGroup.add_argument("--os", dest="os", help="OS this crash appeared on", metavar="(windows|linux|macosx|b2g|android)")
+    fmGroup.add_argument("--productversion", dest="product_version", help="Product version this crash appeared on",
+                         metavar="VERSION")
+    fmGroup.add_argument("--os", dest="os", help="OS this crash appeared on",
+                         metavar="(windows|linux|macosx|b2g|android)")
     fmGroup.add_argument("--tool", dest="tool", help="Name of the tool that found this issue", metavar="NAME")
-    fmGroup.add_argument('--metadata', dest='metadata', nargs='+', type=str, help="List of metadata variables in the form 'KEY=VALUE'")
+    fmGroup.add_argument('--metadata', dest='metadata', nargs='+', type=str,
+                         help="List of metadata variables in the form 'KEY=VALUE'")
 
     parser.add_argument('rargs', nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
 
@@ -138,12 +148,13 @@ def main(argv=None):
         return 2
 
     configuration = ProgramConfiguration.fromBinary(binary)
-    if configuration == None:
+    if configuration is None:
         print("Error: Failed to load program configuration based on binary", file=sys.stderr)
         return 2
 
-        if opts.platform == None or opts.product == None or opts.os == None:
-            print("Error: Must use binary configuration file or specify/configure at least --platform, --product and --os", file=sys.stderr)
+        if opts.platform is None or opts.product is None or opts.os is None:
+            print(("Error: Must use binary configuration file or specify/configure at least "
+                   "--platform, --product and --os"), file=sys.stderr)
             return 2
 
         configuration = ProgramConfiguration(opts.product, opts.platform, opts.os, opts.product_version)
@@ -172,7 +183,7 @@ def main(argv=None):
         configuration.addMetadata(metadata)
 
     # Set LD_LIBRARY_PATH for convenience
-    if not 'LD_LIBRARY_PATH' in env:
+    if 'LD_LIBRARY_PATH' not in env:
         env['LD_LIBRARY_PATH'] = os.path.dirname(binary)
 
     serverauthtoken = None
@@ -180,19 +191,20 @@ def main(argv=None):
         with open(opts.serverauthtokenfile) as f:
             serverauthtoken = f.read().rstrip()
 
-    collector = Collector(opts.sigdir, opts.serverhost, opts.serverport, opts.serverproto, serverauthtoken, opts.clientid, opts.tool)
+    collector = Collector(opts.sigdir, opts.serverhost, opts.serverport, opts.serverproto, serverauthtoken,
+                          opts.clientid, opts.tool)
 
     signature_repeat_count = 0
     last_signature = None
 
     while(True):
         process = subprocess.Popen(
-                 opts.rargs,
-                 # stdout=None,
-                 stderr=subprocess.PIPE,
-                 env=env,
-                 universal_newlines=True
-                )
+            opts.rargs,
+            # stdout=None,
+            stderr=subprocess.PIPE,
+            env=env,
+            universal_newlines=True
+        )
 
         monitor = LibFuzzerMonitor(process.stderr)
         monitor.start()
@@ -207,7 +219,7 @@ def main(argv=None):
 
         (sigfile, metadata) = collector.search(crashInfo)
 
-        if sigfile != None:
+        if sigfile is not None:
             if last_signature == sigfile:
                 signature_repeat_count += 1
             else:
@@ -223,6 +235,7 @@ def main(argv=None):
         if signature_repeat_count >= 10:
             print("Too many crashes with the same signature, exiting...", file=sys.stderr)
             break
+
 
 if __name__ == "__main__":
     sys.exit(main())

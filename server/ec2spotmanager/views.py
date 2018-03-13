@@ -1,20 +1,17 @@
 from chartjs.colors import next_color
 from chartjs.views.base import JSONView
-from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import logout
 from django.core.exceptions import SuspiciousOperation
 from django.core.files.base import ContentFile
 from django.db.models.aggregates import Count
-from django.http.response import Http404
+from django.http.response import Http404  # noqa
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils.timezone import now, timedelta
-import errno
+import fasteners
 from operator import attrgetter
-import os
-from rest_framework import viewsets, status
+from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
-from rest_framework.decorators import authentication_classes, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,15 +24,18 @@ from ec2spotmanager.serializers import MachineStatusSerializer
 
 
 def renderError(request, err):
-    return render(request, 'error.html', { 'error_message' : err })
+    return render(request, 'error.html', {'error_message': err})
+
 
 def logout_view(request):
     logout(request)
     return redirect('ec2spotmanager:index')
 
+
 @login_required(login_url='/login/')
 def index(request):
     return redirect('ec2spotmanager:pools')
+
 
 @login_required(login_url='/login/')
 def pools(request):
@@ -46,8 +46,10 @@ def pools(request):
 
     # These are all keys that are allowed for exact filtering
     exactFilterKeys = [
-                       "config__name",
-                       ]
+        "config__name",
+        "config__name__contains",
+        "isEnabled",
+    ]
 
     for key in exactFilterKeys:
         if key in request.GET:
@@ -61,27 +63,9 @@ def pools(request):
     for entry in entries:
         entry.msgs = PoolStatusEntry.objects.filter(pool=entry).order_by('-created')
 
-    # Figure out if our daemons are running
-    def checkDaemon(daemon_name):
-        daemonPidFile = os.path.join(settings.BASE_DIR, "%s.pid" % daemon_name)
-        daemonRunning = False
-        try:
-            with open(daemonPidFile, 'r') as f:
-                daemonRunning = True
-                pid = int(f.read())
-                try:
-                    os.kill(pid, 0)
-                except OSError as e:
-                    if e.errno == errno.ESRCH:
-                        daemonRunning = False
-                    elif e.errno == errno.EPERM:
-                        daemonRunning = True
-        except IOError:
-            pass
-        return daemonRunning
-
     for pool in entries:
-        pool.instance_requested_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['requested']).count()
+        pool.instance_requested_count = Instance.objects.filter(
+            pool=pool, status_code=INSTANCE_STATE['requested']).count()
         pool.instance_running_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['running']).count()
         if pool.size == pool.instance_running_count:
             pool.size_label = 'success'
@@ -91,12 +75,12 @@ def pools(request):
             pool.size_label = 'warning'
 
     data = {
-            'isSearch' : isSearch,
-            'poollist' : entries,
-            'machineDaemonRunning' : checkDaemon("monitoring_daemon"),
-            }
+        'isSearch': isSearch,
+        'poollist': entries,
+    }
 
     return render(request, 'pools/index.html', data)
+
 
 @login_required(login_url='/login/')
 def viewPool(request, poolid):
@@ -114,8 +98,8 @@ def viewPool(request, poolid):
     last_config = pool.config
     last_config.children = []
 
-    while not cyclic and last_config.parent != None:
-        last_config.parent.children = [ last_config ]
+    while not cyclic and last_config.parent is not None:
+        last_config.parent.children = [last_config]
         last_config = last_config.parent
 
     parent_config = last_config
@@ -125,29 +109,38 @@ def viewPool(request, poolid):
         # Figure out if any parameters are missing
         missing = pool.config.getMissingParameters()
 
-    data = { 'pool' : pool, 'parent_config' : parent_config, 'instances' : instances, 'config_params_missing' : missing, 'config_cyclic' : cyclic }
+    data = {'pool': pool, 'parent_config': parent_config, 'instances': instances, 'config_params_missing': missing,
+            'config_cyclic': cyclic}
 
     return render(request, 'pools/view.html', data)
+
 
 @login_required(login_url='/login/')
 def viewPoolPrices(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
     config = pool.config.flatten()
-    prices = get_spot_prices(config.ec2_allowed_regions, config.aws_access_key_id, config.aws_secret_access_key, config.ec2_instance_type)
+    prices = {instance_type: get_spot_prices(config.ec2_allowed_regions,
+                                             config.aws_access_key_id,
+                                             config.aws_secret_access_key,
+                                             instance_type)
+              for instance_type in config.ec2_instance_types}
 
-    zones = []
+    zones = set()
     latest_price_by_zone = {}
 
-    for region in prices:
-        for zone in prices[region]:
-            zones.append(zone)
-            latest_price_by_zone[zone] = prices[region][zone][0]
+    for instance_type in prices:
+        for region in prices[instance_type]:
+            for zone in prices[instance_type][region]:
+                zones.add(zone)
+                latest_price_by_zone[zone] = min(latest_price_by_zone.get(zone, 9999),
+                                                 prices[instance_type][region][zone][0])
 
     prices = []
     for zone in sorted(zones):
         prices.append((zone, latest_price_by_zone[zone]))
 
-    return render(request, 'pools/prices.html', { 'prices' : prices })
+    return render(request, 'pools/prices.html', {'prices': prices})
+
 
 @login_required(login_url='/login/')
 def disablePool(request, poolid):
@@ -155,16 +148,17 @@ def disablePool(request, poolid):
     instances = Instance.objects.filter(pool=poolid)
 
     if not pool.isEnabled:
-        return render(request, 'pools/error.html', { 'error_message' : 'That pool is already disabled.' })
+        return render(request, 'pools/error.html', {'error_message': 'That pool is already disabled.'})
 
     if request.method == 'POST':
         pool.isEnabled = False
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/disable.html', { 'pool' : pool, 'instanceCount' : len(instances) })
+        return render(request, 'pools/disable.html', {'pool': pool, 'instanceCount': len(instances)})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def enablePool(request, poolid):
@@ -176,16 +170,16 @@ def enablePool(request, poolid):
     # this point already.
     cyclic = pool.config.isCyclic()
     if cyclic:
-        return render(request, 'pools/error.html', { 'error_message' : 'Pool configuration is cyclic.' })
+        return render(request, 'pools/error.html', {'error_message': 'Pool configuration is cyclic.'})
 
     missing = pool.config.getMissingParameters()
     if missing:
-        return render(request, 'pools/error.html', { 'error_message' : 'Pool is missing configuration parameters.' })
+        return render(request, 'pools/error.html', {'error_message': 'Pool is missing configuration parameters.'})
 
     size = pool.config.flatten().size
 
     if pool.isEnabled:
-        return render(request, 'pools/error.html', { 'error_message' : 'That pool is already enabled.' })
+        return render(request, 'pools/error.html', {'error_message': 'That pool is already enabled.'})
 
     if request.method == 'POST':
         pool.isEnabled = True
@@ -193,16 +187,17 @@ def enablePool(request, poolid):
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/enable.html', { 'pool' : pool, 'instanceCount' : size })
+        return render(request, 'pools/enable.html', {'pool': pool, 'instanceCount': size})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def forceCyclePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
 
     if not pool.isEnabled:
-        return render(request, 'pools/error.html', { 'error_message' : 'Pool is disabled.' })
+        return render(request, 'pools/error.html', {'error_message': 'Pool is disabled.'})
 
     size = pool.config.flatten().size
 
@@ -211,16 +206,17 @@ def forceCyclePool(request, poolid):
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/cycle.html', { 'pool' : pool, 'instanceCount' : size })
+        return render(request, 'pools/cycle.html', {'pool': pool, 'instanceCount': size})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def forceCyclePoolsByConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
 
     def recurse_get_dependent_configurations(config):
-        config_pks = [ config.pk ]
+        config_pks = [config.pk]
         configs = PoolConfiguration.objects.filter(parent=config)
 
         for config in configs:
@@ -242,9 +238,10 @@ def forceCyclePoolsByConfig(request, configid):
         InstancePool.objects.filter(pk__in=pool_pks, isEnabled=True).update(last_cycled=None)
         return redirect('ec2spotmanager:pools')
     elif request.method == 'GET':
-        return render(request, 'config/cycle.html', { 'config' : config, 'pools' : pools })
+        return render(request, 'config/cycle.html', {'config': config, 'pools': pools})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def createPool(request):
@@ -256,9 +253,10 @@ def createPool(request):
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
-        return render(request, 'pools/create.html', { 'configurations' : configurations })
+        return render(request, 'pools/create.html', {'configurations': configurations})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def viewConfigs(request):
@@ -275,15 +273,16 @@ def viewConfigs(request):
     for root in roots:
         add_children(root)
 
-    data = { 'roots' : roots }
+    data = {'roots': roots}
 
     return render(request, 'config/index.html', data)
+
 
 @login_required(login_url='/login/')
 def viewConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
 
-    data = { 'config' : config }
+    data = {'config': config}
 
     return render(request, 'config/view.html', data)
 
@@ -322,11 +321,6 @@ def __handleConfigPOST(request, config):
     else:
         config.ec2_key_name = None
 
-    if request.POST['ec2_instance_type']:
-        config.ec2_instance_type = request.POST['ec2_instance_type']
-    else:
-        config.ec2_instance_type = None
-
     if request.POST['ec2_image_name']:
         config.ec2_image_name = request.POST['ec2_image_name']
     else:
@@ -347,8 +341,14 @@ def __handleConfigPOST(request, config):
     else:
         config.ec2_security_groups_list = None
 
+    if request.POST['ec2_instance_types']:
+        config.ec2_instance_types_list = [x.strip() for x in request.POST['ec2_instance_types'].split(',')]
+    else:
+        config.ec2_instance_types_list = None
+
     if request.POST['ec2_userdata_macros']:
-        config.ec2_userdata_macros_dict = dict(y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_userdata_macros'].split(',')])
+        config.ec2_userdata_macros_dict = dict(
+            y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_userdata_macros'].split(',')])
     else:
         config.ec2_userdata_macros_dict = None
 
@@ -358,7 +358,8 @@ def __handleConfigPOST(request, config):
         config.ec2_tags_dict = None
 
     if request.POST['ec2_raw_config']:
-        config.ec2_raw_config_dict = dict(y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_raw_config'].split(',')])
+        config.ec2_raw_config_dict = dict(
+            y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_raw_config'].split(',')])
     else:
         config.ec2_raw_config_dict = None
 
@@ -369,6 +370,8 @@ def __handleConfigPOST(request, config):
         if not config.ec2_userdata_file.name:
             config.ec2_userdata_file.save("default.sh", ContentFile(""))
         config.ec2_userdata = request.POST['ec2_userdata']
+        if request.POST.get('ec2_userdata_ff', 'unix') == 'unix':
+            config.ec2_userdata = config.ec2_userdata.replace('\r\n', '\n')
         config.storeTestAndSave()
     else:
         if config.ec2_userdata_file:
@@ -377,6 +380,7 @@ def __handleConfigPOST(request, config):
             config.storeTestAndSave()
 
     return redirect('ec2spotmanager:configview', configid=config.pk)
+
 
 @login_required(login_url='/login/')
 def createConfig(request):
@@ -397,10 +401,15 @@ def createConfig(request):
 
         config.deserializeFields()
 
-        data = { 'config' : config, 'configurations' : configurations, 'edit' : False, 'clone' : clone  }
+        data = {'clone': clone,
+                'config': config,
+                'configurations': configurations,
+                'edit': False,
+                'userdata_ff': 'unix'}
         return render(request, 'config/edit.html', data)
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def editConfig(request, configid):
@@ -411,29 +420,48 @@ def editConfig(request, configid):
         return __handleConfigPOST(request, config)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
-        data = { 'config' : config, 'configurations' : configurations, 'edit' : True }
+        data = {'config': config,
+                'configurations': configurations,
+                'edit': True,
+                'userdata_ff': 'dos' if (b'\r\n' in (config.ec2_userdata or b'')) else 'unix'}
         return render(request, 'config/edit.html', data)
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def deletePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
 
     if pool.isEnabled:
-        return render(request, 'pools/error.html', { 'error_message' : 'That pool is still enabled, you must disable it first.' })
+        return render(request, 'pools/error.html', {
+            'error_message': 'That pool is still enabled, you must disable it first.'})
 
     instances = Instance.objects.filter(pool=poolid)
     if instances:
-        return render(request, 'pools/error.html', { 'error_message' : 'That pool still has instances associated with it. Please wait for their termination first.' })
+        return render(request, 'pools/error.html', {
+            'error_message': ('That pool still has instances associated with it. '
+                              'Please wait for their termination first.')})
 
     if request.method == 'POST':
-        pool.delete()
+        lock = fasteners.InterProcessLock('/tmp/ec2spotmanager.pool%d.lck' % poolid)
+
+        if not lock.acquire(blocking=False):
+            return render(request, 'pools/error.html', {
+                'error_message': ('That pool is currently being updated. Please try again.')})
+
+        try:
+            pool.delete()
+        finally:
+            lock.release()
+
         return redirect('ec2spotmanager:pools')
+
     elif request.method == 'GET':
-        return render(request, 'pools/delete.html', { 'entry' : pool })
+        return render(request, 'pools/delete.html', {'entry': pool})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def deletePoolMsg(request, msgid):
@@ -442,9 +470,10 @@ def deletePoolMsg(request, msgid):
         entry.delete()
         return redirect('ec2spotmanager:pools')
     elif request.method == 'GET':
-        return render(request, 'pools/messages/delete.html', { 'entry' : entry })
+        return render(request, 'pools/messages/delete.html', {'entry': entry})
     else:
         raise SuspiciousOperation
+
 
 @login_required(login_url='/login/')
 def deleteConfig(request, configid):
@@ -453,23 +482,28 @@ def deleteConfig(request, configid):
     pools = InstancePool.objects.filter(config=config)
     for pool in pools:
         if pool.isEnabled:
-            return render(request, 'pools/error.html', { 'error_message' : 'That configuration is still used by one or more (enabled) instance pools.' })
+            return render(request, 'pools/error.html', {
+                'error_message': 'That configuration is still used by one or more (enabled) instance pools.'})
 
         instances = Instance.objects.filter(pool=pool)
         if instances:
-            return render(request, 'pools/error.html', { 'error_message' : 'A pool using this configuration still has instances associated with it. Please wait for their termination first.' })
+            return render(request, 'pools/error.html', {
+                'error_message': ('A pool using this configuration still has instances associated with it. '
+                                  'Please wait for their termination first.')})
 
     if PoolConfiguration.objects.filter(parent=config):
-        return render(request, 'pools/error.html', { 'error_message' : 'That configuration is still referenced by one or more other configurations.' })
+        return render(request, 'pools/error.html', {
+            'error_message': 'That configuration is still referenced by one or more other configurations.'})
 
     if request.method == 'POST':
         pools.delete()
         config.delete()
         return redirect('ec2spotmanager:configs')
     elif request.method == 'GET':
-        return render(request, 'config/delete.html', { 'entry' : config, 'pools' : pools })
+        return render(request, 'config/delete.html', {'entry': config, 'pools': pools})
     else:
         raise SuspiciousOperation
+
 
 class UptimeChartViewDetailed(JSONView):
     def get_context_data(self, **kwargs):
@@ -481,10 +515,10 @@ class UptimeChartViewDetailed(JSONView):
         entries = PoolUptimeDetailedEntry.objects.filter(pool=pool, created__gt=latest).order_by('created')
 
         context.update({
-                        'labels' : self.get_labels(pool, entries),
-                        'datasets' : self.get_datasets(pool, entries),
-                        'options' : self.get_options(pool, entries),
-                        })
+            'labels': self.get_labels(pool, entries),
+            'datasets': self.get_datasets(pool, entries),
+            'options': self.get_options(pool, entries),
+        })
         return context
 
     def get_colors(self):
@@ -506,7 +540,6 @@ class UptimeChartViewDetailed(JSONView):
 
         return colors
 
-
     def get_options(self, pool, entries):
         if entries:
             scaleSteps = max(entries, key=attrgetter('target')).target + 1
@@ -514,12 +547,12 @@ class UptimeChartViewDetailed(JSONView):
             # Default to the current pool size if we have no entries at all
             scaleSteps = pool.flat_config.size + 1
         return {
-                'scaleOverride' : True,
-                'scaleSteps' : scaleSteps,
-                'scaleStepWidth' : 1,
-                'scaleStartValue' :-1,
-                'barValueSpacing' : 0,
-                'barShowStroke' : False,
+            'scaleOverride': True,
+            'scaleSteps': scaleSteps,
+            'scaleStepWidth': 1,
+            'scaleStartValue': -1,
+            'barValueSpacing': 0,
+            'barShowStroke': False,
         }
 
     def get_datasets(self, pool, entries):
@@ -529,19 +562,20 @@ class UptimeChartViewDetailed(JSONView):
 
         data = [x.actual for x in entries]
         dataset = {
-                   'fillColor': self.get_data_colors(entries),
-                   # 'highlightFill': "rgba(84,255,159,0.2)",
-                   'strokeColor': "rgba(%d, %d, %d, 1)" % color,
-                   'pointColor': "rgba(%d, %d, %d, 1)" % color,
-                   'pointStrokeColor': "#fff",
-                   'data': data
-                   }
+            'fillColor': self.get_data_colors(entries),
+            # 'highlightFill': "rgba(84,255,159,0.2)",
+            'strokeColor': "rgba(%d, %d, %d, 1)" % color,
+            'pointColor': "rgba(%d, %d, %d, 1)" % color,
+            'pointStrokeColor': "#fff",
+            'data': data
+        }
 
         datasets.append(dataset)
         return datasets
 
     def get_labels(self, pool, entries):
         return [x.created.strftime("%H:%M") for x in entries]
+
 
 class UptimeChartViewAccumulated(JSONView):
     def get_context_data(self, **kwargs):
@@ -553,10 +587,10 @@ class UptimeChartViewAccumulated(JSONView):
         entries = PoolUptimeAccumulatedEntry.objects.filter(pool=pool, created__gt=latest).order_by('created')
 
         context.update({
-                        'labels' : self.get_labels(pool, entries),
-                        'datasets' : self.get_datasets(pool, entries),
-                        'options' : self.get_options(pool, entries),
-                        })
+            'labels': self.get_labels(pool, entries),
+            'datasets': self.get_datasets(pool, entries),
+            'options': self.get_options(pool, entries),
+        })
         return context
 
     def get_colors(self):
@@ -581,19 +615,18 @@ class UptimeChartViewAccumulated(JSONView):
 
         return colors
 
-
     def get_options(self, pool, entries):
         # Scale to 100% but use 110 so the red bar is actually visible
         scaleSteps = 11
         return {
-                'scaleOverride' : True,
-                'scaleSteps' : scaleSteps,
-                'scaleStepWidth' : 10,
-                'scaleStartValue' :-10,
-                'scaleLabel' : '<%=value%>%',
-                'tooltipTemplate' : '<%if (label){%><%=label%>: <%}%><%= value%>%',
-                'barValueSpacing' : 0,
-                'barShowStroke' : False,
+            'scaleOverride': True,
+            'scaleSteps': scaleSteps,
+            'scaleStepWidth': 10,
+            'scaleStartValue': -10,
+            'scaleLabel': '<%=value%>%',
+            'tooltipTemplate': '<%if (label){%><%=label%>: <%}%><%= value%>%',
+            'barValueSpacing': 0,
+            'barShowStroke': False,
         }
 
     def get_datasets(self, pool, entries):
@@ -603,13 +636,13 @@ class UptimeChartViewAccumulated(JSONView):
 
         data = [x.uptime_percentage for x in entries]
         dataset = {
-                   'fillColor': self.get_data_colors(entries),
-                   # 'highlightFill': "rgba(84,255,159,0.2)",
-                   'strokeColor': "rgba(%d, %d, %d, 1)" % color,
-                   'pointColor': "rgba(%d, %d, %d, 1)" % color,
-                   'pointStrokeColor': "#fff",
-                   'data': data
-                   }
+            'fillColor': self.get_data_colors(entries),
+            # 'highlightFill': "rgba(84,255,159,0.2)",
+            'strokeColor': "rgba(%d, %d, %d, 1)" % color,
+            'pointColor': "rgba(%d, %d, %d, 1)" % color,
+            'pointStrokeColor': "#fff",
+            'data': data
+        }
 
         datasets.append(dataset)
         return datasets
@@ -617,8 +650,9 @@ class UptimeChartViewAccumulated(JSONView):
     def get_labels(self, pool, entries):
         return [x.created.strftime("%b %d") for x in entries]
 
+
 class MachineStatusViewSet(APIView):
-    authentication_classes = (TokenAuthentication,)
+    authentication_classes = (TokenAuthentication,)  # noqa
 
     def get(self, request, *args, **kwargs):
         result = {}
@@ -636,30 +670,32 @@ class MachineStatusViewSet(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class PoolCycleView(APIView):
-    authentication_classes = (TokenAuthentication,)
+    authentication_classes = (TokenAuthentication,)  # noqa
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)
 
         if not pool.isEnabled:
-            return Response({"error" : 'Pool is disabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            return Response({"error": 'Pool is disabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
         pool.last_cycled = None
         pool.save()
 
         return Response({}, status=status.HTTP_200_OK)
 
+
 class PoolEnableView(APIView):
-    authentication_classes = (TokenAuthentication,)
+    authentication_classes = (TokenAuthentication,)  # noqa
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)
 
         if pool.isEnabled:
-            return Response({"error" : 'Pool is already enabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            return Response({"error": 'Pool is already enabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
         pool.last_cycled = None
         pool.isEnabled = True
@@ -667,15 +703,16 @@ class PoolEnableView(APIView):
 
         return Response({}, status=status.HTTP_200_OK)
 
+
 class PoolDisableView(APIView):
-    authentication_classes = (TokenAuthentication,)
+    authentication_classes = (TokenAuthentication,)  # noqa
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)
 
         if not pool.isEnabled:
-            return Response({"error" : 'Pool is already disabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            return Response({"error": 'Pool is already disabled.'}, status=status.HTTP_406_NOT_ACCEPTABLE)
 
         pool.isEnabled = False
         pool.save()

@@ -13,10 +13,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 import json
 import logging
 
-import pytest
 import requests
 from django.contrib.auth.models import User
-from django.core.urlresolvers import reverse
+from django.core.urlresolvers import reverse  # noqa
 from rest_framework.test import APITestCase
 
 from . import TestCase
@@ -71,7 +70,7 @@ class RestRepositoriesTests(APITestCase, TestCase):
         self.client.force_authenticate(user=user)
         resp = self.client.get('/covmanager/rest/repositories/')
         self.assertEqual(resp.status_code, requests.codes['ok'])
-        resp = json.loads(resp.content)
+        resp = json.loads(resp.content.decode('utf-8'))
         self.assertEqual(set(resp.keys()), {"count", "previous", "results", "next"})
         self.assertEqual(resp['count'], 1)
         self.assertIsNone(resp['previous'])
@@ -128,6 +127,6 @@ class RestRepositoryTests(APITestCase, TestCase):
         self.client.force_authenticate(user=user)
         resp = self.client.get('/covmanager/rest/repositories/%d/' % repo.pk)
         self.assertEqual(resp.status_code, requests.codes['ok'])
-        resp = json.loads(resp.content)
+        resp = json.loads(resp.content.decode('utf-8'))
         self.assertEqual(set(resp.keys()), {'name'})
         self.assertEqual(resp['name'], 'testrepo')

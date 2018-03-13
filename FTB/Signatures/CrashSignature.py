@@ -67,7 +67,7 @@ class CrashSignature():
             return CrashSignature(sigFd.read())
 
     def __str__(self):
-        return self.rawSignature
+        return str(self.rawSignature)
 
     def matches(self, crashInfo):
         '''
@@ -79,13 +79,13 @@ class CrashSignature():
         @rtype: bool
         @return: True if the signature matches, False otherwise
         '''
-        if self.platforms != None and not crashInfo.configuration.platform in self.platforms:
+        if self.platforms is not None and crashInfo.configuration.platform not in self.platforms:
             return False
 
-        if self.operatingSystems != None and not crashInfo.configuration.os in self.operatingSystems:
+        if self.operatingSystems is not None and crashInfo.configuration.os not in self.operatingSystems:
             return False
 
-        if self.products != None and not crashInfo.configuration.product in self.products:
+        if self.products is not None and crashInfo.configuration.product not in self.products:
             return False
 
         deferredSymptoms = []
@@ -151,7 +151,7 @@ class CrashSignature():
         for symptom in self.symptoms:
             if isinstance(symptom, StackFramesSymptom):
                 symptomDistance = symptom.diff(crashInfo)[0]
-                if symptomDistance != None:
+                if symptomDistance is not None:
                     distance += symptomDistance
                 else:
                     # If we can't find the distance, assume worst-case
@@ -160,13 +160,13 @@ class CrashSignature():
                 if not symptom.matches(crashInfo):
                     distance += 1
 
-        if self.platforms != None and not crashInfo.configuration.platform in self.platforms:
+        if self.platforms is not None and crashInfo.configuration.platform not in self.platforms:
             distance += 1
 
-        if self.operatingSystems != None and not crashInfo.configuration.os in self.operatingSystems:
+        if self.operatingSystems is not None and crashInfo.configuration.os not in self.operatingSystems:
             distance += 1
 
-        if self.products != None and not crashInfo.configuration.product in self.products:
+        if self.products is not None and crashInfo.configuration.product not in self.products:
             distance += 1
 
         return distance
@@ -204,7 +204,7 @@ class CrashSignature():
         symptomsDiff = []
         for symptom in self.symptoms:
             if symptom.matches(crashInfo):
-                symptomsDiff.append({ 'offending' : False, 'symptom' : symptom })
+                symptomsDiff.append({'offending': False, 'symptom': symptom})
             else:
                 # Special-case StackFramesSymptom because we would like to get a fine-grained
                 # view on the offending parts *inside* that symptom. By calling matchWithDiff,
@@ -212,10 +212,10 @@ class CrashSignature():
                 if isinstance(symptom, StackFramesSymptom):
                     proposedSymptom = symptom.diff(crashInfo)[1]
                     if proposedSymptom:
-                        symptomsDiff.append({ 'offending' : True, 'symptom' : symptom, 'proposed' : proposedSymptom })
+                        symptomsDiff.append({'offending': True, 'symptom': symptom, 'proposed': proposedSymptom})
                         continue
 
-                symptomsDiff.append({ 'offending' : True, 'symptom' : symptom })
+                symptomsDiff.append({'offending': True, 'symptom': symptom})
         return symptomsDiff
 
     def getSignatureUnifiedDiffTuples(self, crashInfo):
@@ -231,7 +231,8 @@ class CrashSignature():
         signatureDiff = difflib.unified_diff(oldLines, newLines, n=context)
 
         for diffLine in signatureDiff:
-            if diffLine.startswith('+++') or diffLine.startswith('---') or diffLine.startswith('@@') or not diffLine.strip():
+            if (diffLine.startswith('+++') or diffLine.startswith('---') or diffLine.startswith('@@') or
+                    not diffLine.strip()):
                 continue
 
             diffTuples.append((diffLine[0], diffLine[1:]))

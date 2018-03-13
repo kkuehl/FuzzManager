@@ -23,9 +23,9 @@ from django.forms.models import model_to_dict
 from django.shortcuts import render, get_object_or_404
 from django.utils import dateparse
 
-from BugzillaREST import BugzillaREST
-from crashmanager.Bugtracker.Provider import Provider
-from crashmanager.models import BugzillaTemplate, User
+from .BugzillaREST import BugzillaREST
+from .Provider import Provider
+from ..models import BugzillaTemplate, User
 
 
 class BugzillaProvider(Provider):
@@ -33,31 +33,31 @@ class BugzillaProvider(Provider):
         super(BugzillaProvider, self).__init__(pk, hostname)
 
         self.templateFields = [
-                    "name",
-                    "product",
-                    "component",
-                    "summary",
-                    "version",
-                    "description",
-                    "op_sys",
-                    "platform",
-                    "priority",
-                    "severity",
-                    "alias",
-                    "cc",
-                    "assigned_to",
-                    "qa_contact",
-                    "target_milestone",
-                    "whiteboard",
-                    "keywords",
-                    "attrs",
-                    "security_group",
-                    "testcase_filename",
-                ]
+            "name",
+            "product",
+            "component",
+            "summary",
+            "version",
+            "description",
+            "op_sys",
+            "platform",
+            "priority",
+            "severity",
+            "alias",
+            "cc",
+            "assigned_to",
+            "qa_contact",
+            "target_milestone",
+            "whiteboard",
+            "keywords",
+            "attrs",
+            "security_group",
+            "testcase_filename",
+        ]
 
         self.templateFlags = [
-                    "security",
-                ]
+            "security",
+        ]
 
     def getTemplateForUser(self, request, crashEntry):
         if 'template' in request.GET:
@@ -89,6 +89,9 @@ class BugzillaProvider(Provider):
 
         # Store possible attachment data/flags (e.g. crashdata)
         attachmentData = {}
+
+        # For now, the skip test checkbox isn't part of the template
+        attachmentData['testcase_skip'] = False
 
         # Load metadata that we need for various things
         metadata = {}
@@ -177,7 +180,7 @@ class BugzillaProvider(Provider):
             # Find all metadata variables requested for subtitution
             metadataVars = re.findall("%metadata\.([a-zA-Z0-9_\-]+)%", source)
             for mVar in metadataVars:
-                if not mVar in metadata:
+                if mVar not in metadata:
                     metadata[mVar] = "(%s not available)" % mVar
 
                 source = source.replace('%metadata.' + mVar + '%', metadata[mVar])
@@ -188,8 +191,10 @@ class BugzillaProvider(Provider):
 
         # Handle ".attached" properties
         if '%crashdata.attached%' in template["description"] or '%crashdata.attached%' in template["comment"]:
-            template["description"] = template["description"].replace('%crashdata.attached%', "For detailed crash information, see attachment.")
-            template["comment"] = template["comment"].replace('%crashdata.attached%', "For detailed crash information, see attachment.")
+            template["description"] = template["description"].replace(
+                '%crashdata.attached%', "For detailed crash information, see attachment.")
+            template["comment"] = template["comment"].replace(
+                '%crashdata.attached%', "For detailed crash information, see attachment.")
             attachmentData["crashdata_attach"] = sdata['crashdata']
 
         # Remove the specified pathPrefix from traces and assertion
@@ -199,7 +204,8 @@ class BugzillaProvider(Provider):
             template["comment"] = template["comment"].replace(metadata["pathPrefix"], "")
 
             if "crashdata_attach" in attachmentData:
-                attachmentData["crashdata_attach"] = attachmentData["crashdata_attach"].replace(metadata["pathPrefix"], "")
+                attachmentData["crashdata_attach"] = attachmentData["crashdata_attach"].replace(
+                    metadata["pathPrefix"], "")
 
         if crashEntry.shortSignature.startswith("[@"):
             template["attrs"] = template["attrs"] + "\ncf_crash_signature=" + crashEntry.shortSignature
@@ -218,15 +224,15 @@ class BugzillaProvider(Provider):
             attachmentData = self.substituteTemplateForCrash(template, crashEntry)
 
         data = {
-                   'hostname' : self.hostname,
-                   'templates' : templates,
-                   'template' : template,
-                   'entry' : crashEntry,
-                   'provider' : self.pk,
-                   'mode' : mode,
-                   'postTarget' : postTarget,
-                   'attachmentData' : attachmentData,
-                }
+            'hostname': self.hostname,
+            'templates': templates,
+            'template': template,
+            'entry': crashEntry,
+            'provider': self.pk,
+            'mode': mode,
+            'postTarget': postTarget,
+            'attachmentData': attachmentData,
+        }
 
         return render(request, 'bugzilla/submit.html', data)
 
@@ -260,7 +266,7 @@ class BugzillaProvider(Provider):
 
         # Remove any other variables that we don't want to pass on
         for key in request.POST:
-            if not key in self.templateFields:
+            if key not in self.templateFields:
                 del(args[key])
 
         # Convert the attrs field to a dict
@@ -271,7 +277,7 @@ class BugzillaProvider(Provider):
             args["groups"] = ["core-security"]
             # Allow security_group to override the default security group used
             if 'security_group' in request.POST and request.POST['security_group']:
-                args["groups"] = [ request.POST['security_group'] ]
+                args["groups"] = [request.POST['security_group']]
 
         # security_group is a field we need in our template, but it does not correspond
         # to a field in Bugzilla so we need to remove it here.
@@ -288,17 +294,18 @@ class BugzillaProvider(Provider):
         # Create the bug
         bz = BugzillaREST(self.hostname, username, password, api_key)
         ret = bz.createBug(**args)
-        if not "id" in ret:
+        if "id" not in ret:
             raise RuntimeError("Failed to create bug: %s", ret)
 
         # If we were told to attach the crash data, do so now
         if crashdata_attach:
-            cRet = bz.addAttachment(ret["id"], crashdata_attach, "crash_data.txt", "Detailed Crash Information", is_binary=False)
+            cRet = bz.addAttachment(ret["id"], crashdata_attach, "crash_data.txt", "Detailed Crash Information",
+                                    is_binary=False)
             ret["crashdataAttachmentResponse"] = cRet
 
         # If we have a binary testcase or the testcase is too large,
         # attach it here in a second step
-        if crashEntry.testcase != None:
+        if crashEntry.testcase is not None and 'testcase_skip' not in request.POST:
             crashEntry.testcase.test.open(mode='rb')
             data = crashEntry.testcase.test.read()
             crashEntry.testcase.test.close()
@@ -348,17 +355,18 @@ class BugzillaProvider(Provider):
         bz = BugzillaREST(self.hostname, username, password, api_key)
 
         ret = bz.createComment(**args)
-        if not "id" in ret:
+        if "id" not in ret:
             raise RuntimeError("Failed to create comment: %s", ret)
 
         # If we were told to attach the crash data, do so now
         if crashdata_attach:
-            cRet = bz.addAttachment(args["id"], crashdata_attach, "crash_data.txt", "Detailed Crash Information", is_binary=False)
+            cRet = bz.addAttachment(args["id"], crashdata_attach, "crash_data.txt", "Detailed Crash Information",
+                                    is_binary=False)
             ret["crashdataAttachmentResponse"] = cRet
 
         # If we have a binary testcase or the testcase is too large,
         # attach it here in a second step
-        if crashEntry.testcase != None:
+        if crashEntry.testcase is not None and 'testcase_skip' not in request.POST:
             crashEntry.testcase.test.open(mode='rb')
             data = crashEntry.testcase.test.read()
             crashEntry.testcase.test.close()
@@ -389,11 +397,11 @@ class BugzillaProvider(Provider):
             template = {}
 
         data = {
-                'createTemplate' : True,
-                'template' : template,
-                'provider' : self.pk,
-                'mode' : "create",
-                }
+            'createTemplate': True,
+            'template': template,
+            'provider': self.pk,
+            'mode': "create",
+        }
 
         return render(request, 'bugzilla/submit.html', data)
 
@@ -402,11 +410,11 @@ class BugzillaProvider(Provider):
         templates = BugzillaTemplate.objects.all()
 
         data = {
-                'provider' : self.pk,
-                'templates' : templates,
-                'template' : template,
-                'mode' : mode,
-                }
+            'provider': self.pk,
+            'templates': templates,
+            'template': template,
+            'mode': mode,
+        }
 
         return render(request, 'bugzilla/view_edit_template.html', data)
 

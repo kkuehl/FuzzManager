@@ -1,11 +1,14 @@
 from django.core.paginator import Paginator, PageNotAnInteger, EmptyPage
 from django.db.models import Q
+import collections
 import json
-import operator
 from rest_framework import filters
+import six
+
 
 def renderError(request, err):
-    return render(request, 'error.html', { 'error_message' : err })
+    return render(request, 'error.html', {'error_message': err})  # noqa
+
 
 def paginate_requested_list(request, entries):
     """
@@ -31,13 +34,14 @@ def paginate_requested_list(request, entries):
     # We need to preserve the query parameters when adding the page to the
     # query URL, so we store the sanitized copy inside our entries object.
     paginator_query = request.GET.copy()
-    if paginator_query.has_key('page'):
+    if 'page' in paginator_query:
         del paginator_query['page']
 
     page_entries.paginator_query = paginator_query
     page_entries.count = paginator.count
 
     return page_entries
+
 
 def json_to_query(json_str):
     """
@@ -64,14 +68,14 @@ def json_to_query(json_str):
     then the operator has no effect.
     """
     try:
-        obj = json.loads(json_str, object_pairs_hook=OrderedDict)
+        obj = json.loads(json_str, object_pairs_hook=collections.OrderedDict)  # noqa
     except ValueError as e:
         raise RuntimeError("Invalid JSON: %s" % e)
 
     def get_query_obj(obj, key=None):
 
-        if obj is None or isinstance(obj, (basestring, list, int)):
-            kwargs = { key : obj }
+        if obj is None or isinstance(obj, (six.text_type, list, int)):
+            kwargs = {key: obj}
             qobj = Q(**kwargs)
             return qobj
         elif not isinstance(obj, dict):
@@ -79,7 +83,7 @@ def json_to_query(json_str):
 
         qobj = Q()
 
-        if not "op" in obj:
+        if "op" not in obj:
                 raise RuntimeError("No operator specified in query object")
 
         op = obj["op"]
@@ -104,6 +108,7 @@ def json_to_query(json_str):
 
     return (obj, get_query_obj(obj))
 
+
 class JsonQueryFilterBackend(filters.BaseFilterBackend):
     """
     Accepts filtering with a query parameter which builds a Django query from JSON (see json_to_query)
@@ -117,9 +122,10 @@ class JsonQueryFilterBackend(filters.BaseFilterBackend):
             try:
                 _, queryobj = json_to_query(querystr)
             except RuntimeError as e:
-                raise InvalidArgumentException("error in query: %s" % e)
+                raise InvalidArgumentException("error in query: %s" % e)  # noqa
             queryset = queryset.filter(queryobj)
         return queryset
+
 
 class SimpleQueryFilterBackend(filters.BaseFilterBackend):
     """
@@ -137,7 +143,7 @@ class SimpleQueryFilterBackend(filters.BaseFilterBackend):
         if querystr is not None:
             queryobj = None
             for field in queryset[0].simple_query_fields:
-                kwargs = { "%s__contains" % field : querystr }
+                kwargs = {"%s__contains" % field: querystr}
                 if queryobj is None:
                     queryobj = Q(**kwargs)
                 else:

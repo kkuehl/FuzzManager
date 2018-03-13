@@ -17,18 +17,22 @@ from __future__ import print_function
 
 from abc import ABCMeta, abstractmethod
 
+import six
+
+
 class UnknownRevisionException(Exception):
     pass
+
 
 class UnknownFilenameException(Exception):
     pass
 
+
+@six.add_metaclass(ABCMeta)
 class SourceCodeProvider():
     '''
     Abstract base class that defines what interfaces Source Code Providers must implement
     '''
-    __metaclass__ = ABCMeta
-
     def __init__(self, location):
         self.location = location
 
@@ -102,6 +106,7 @@ class SourceCodeProvider():
         """
         return
 
+
 class Utils():
 
     @staticmethod
@@ -137,7 +142,7 @@ class Utils():
         diff = diff.splitlines()
 
         while diff:
-            cobj = { "filename" : None, "locations": [] }
+            cobj = {"filename": None, "locations": []}
 
             skipDiff = False
 

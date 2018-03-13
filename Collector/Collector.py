@@ -25,29 +25,26 @@ import base64
 import hashlib
 import json
 import os
-import platform
-import requests
 import shutil
 import sys
 from tempfile import mkstemp
-import time
 from zipfile import ZipFile
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 FTB_PATH = os.path.abspath(os.path.join(BASE_DIR, ".."))
 sys.path += [FTB_PATH]
 
-from FTB.ConfigurationFiles import ConfigurationFiles
-from FTB.ProgramConfiguration import ProgramConfiguration
-from FTB.Running.AutoRunner import AutoRunner
-from FTB.Signatures.CrashInfo import CrashInfo
-from FTB.Signatures.CrashSignature import CrashSignature
-from Reporter.Reporter import Reporter, signature_checks, remote_checks
+from FTB.ProgramConfiguration import ProgramConfiguration  # noqa
+from FTB.Running.AutoRunner import AutoRunner  # noqa
+from FTB.Signatures.CrashInfo import CrashInfo  # noqa
+from FTB.Signatures.CrashSignature import CrashSignature  # noqa
+from Reporter.Reporter import Reporter, signature_checks, remote_checks  # noqa
 
 __all__ = []
 __version__ = 0.1
 __date__ = '2014-10-01'
 __updated__ = '2014-10-01'
+
 
 class Collector(Reporter):
     @remote_checks
@@ -60,10 +57,7 @@ class Collector(Reporter):
         url = "%s://%s:%d/crashmanager/files/signatures.zip" % (self.serverProtocol, self.serverHost, self.serverPort)
 
         # We need to use basic authentication here because these files are directly served by the HTTP server
-        response = requests.get(url, stream=True, auth=('fuzzmanager', self.serverAuthToken))
-
-        if response.status_code != requests.codes["ok"]:
-            raise Reporter.serverError(response)
+        response = self.get(url, stream=True, auth='basic')
 
         (zipFileFd, zipFileName) = mkstemp(prefix="fuzzmanager-signatures")
 
@@ -160,22 +154,7 @@ class Collector(Reporter):
         if crashInfo.configuration.args:
             data["args"] = json.dumps(crashInfo.configuration.args)
 
-        current_timeout = 2
-        while True:
-            response = requests.post(url, data, headers=dict(Authorization="Token %s" % self.serverAuthToken))
-
-            if response.status_code != requests.codes["created"]:
-                # Allow for a total sleep time of up to 2 minutes if it's
-                # likely that the response codes indicate a temporary error
-                retry_codes = [500, 502, 503, 504]
-                if response.status_code in retry_codes and current_timeout <= 64:
-                    time.sleep(current_timeout)
-                    current_timeout *= 2
-                    continue
-
-                raise Reporter.serverError(response)
-            else:
-                return response.json()
+        return self.post(url, data).json()
 
     @signature_checks
     def search(self, crashInfo):
@@ -251,32 +230,71 @@ class Collector(Reporter):
         @rtype: tuple
         @return: Tuple containing name of the file where the test was stored and the raw JSON response
         '''
-        url = "%s://%s:%d/crashmanager/rest/crashes/%s/" % (self.serverProtocol, self.serverHost, self.serverPort, crashId)
+        url = "%s://%s:%d/crashmanager/rest/crashes/%s/" % (self.serverProtocol, self.serverHost, self.serverPort,
+                                                            crashId)
 
-        response = requests.get(url, headers=dict(Authorization="Token %s" % self.serverAuthToken))
+        response = self.get(url)
+        resp_json = response.json()
 
-        if response.status_code != requests.codes["ok"]:
-            raise Reporter.serverError(response)
+        if not isinstance(resp_json, dict):
+            raise RuntimeError("Server sent malformed JSON response: %r" % (resp_json,))
 
-        respJson = response.json()
-
-        if not isinstance(respJson, dict):
-            raise RuntimeError("Server sent malformed JSON response: %s" % respJson)
-
-        if not respJson["testcase"]:
+        if not resp_json["testcase"]:
             return None
 
-        url = "%s://%s:%d/crashmanager/%s" % (self.serverProtocol, self.serverHost, self.serverPort, respJson["testcase"])
-        response = requests.get(url, auth=('fuzzmanager', self.serverAuthToken))
+        url = "%s://%s:%d/crashmanager/%s" % (self.serverProtocol, self.serverHost, self.serverPort,
+                                              resp_json["testcase"])
+        response = self.get(url, auth='basic')
 
-        if response.status_code != requests.codes["ok"]:
-            raise Reporter.serverError(response)
+        local_filename = '%d%s' % (resp_json["id"], os.path.splitext(resp_json["testcase"])[1])
+        with open(local_filename, 'wb') as output:
+            output.write(response.content)
 
-        localFile = os.path.basename(respJson["testcase"])
-        with open(localFile, 'wb') as f:
-            f.write(response.content)
+        return (local_filename, resp_json)
 
-        return (localFile, respJson)
+    @remote_checks
+    def download_all(self, bucketId):
+        '''
+        Download all testcases for the specified bucketId.
+
+        @type bucketId: int
+        @param bucketId: ID of the requested bucket on the server side
+
+        @rtype: generator
+        @return: generator of filenames where tests were stored.
+        '''
+        params = {
+            "query": json.dumps({
+                "op": "OR",
+                "bucket": bucketId
+            })
+        }
+        next_url = "%s://%s:%d/crashmanager/rest/crashes/" % (self.serverProtocol, self.serverHost, self.serverPort)
+
+        while next_url:
+
+            resp_json = self.get(next_url, params=params).json()
+
+            if not isinstance(resp_json, dict):
+                raise RuntimeError("Server sent malformed JSON response: %r" % (resp_json,))
+
+            next_url = resp_json["next"]
+            params = None
+
+            for crash in resp_json["results"]:
+
+                if not crash["testcase"]:
+                    continue
+
+                url = "%s://%s:%d/crashmanager/%s" % (self.serverProtocol, self.serverHost, self.serverPort,
+                                                      crash["testcase"])
+                response = self.get(url, auth='basic')
+
+                local_filename = '%d%s' % (crash["id"], os.path.splitext(crash["testcase"])[1])
+                with open(local_filename, 'wb') as output:
+                    output.write(response.content)
+
+                yield local_filename
 
     def __store_signature_hashed(self, signature):
         '''
@@ -290,7 +308,10 @@ class Collector(Reporter):
 
         '''
         h = hashlib.new('sha1')
-        h.update(str(signature))
+        if str is bytes:
+            h.update(str(signature))
+        else:
+            h.update(str(signature).encode("utf-8"))
         sigfile = os.path.join(self.sigCacheDir, h.hexdigest() + ".signature")
         with open(sigfile, 'w') as f:
             f.write(str(signature))
@@ -318,6 +339,7 @@ class Collector(Reporter):
 
         return (testCaseData, isBinary)
 
+
 def main(args=None):
     '''Command line options.'''
 
@@ -337,9 +359,16 @@ def main(args=None):
     actions.add_argument("--refresh", action='store_true', help="Perform a signature refresh")
     actions.add_argument("--submit", action='store_true', help="Submit a signature to the server")
     actions.add_argument("--search", action='store_true', help="Search cached signatures for the given crash")
-    actions.add_argument("--generate", action='store_true', help="Create a (temporary) local signature in the cache directory")
-    actions.add_argument("--autosubmit", action='store_true', help="Go into auto-submit mode. In this mode, all remaining arguments are interpreted as the crashing command. This tool will automatically obtain GDB crash information and submit it.")
-    actions.add_argument("--download", type=int, help="Download the testcase for the specified crash entry", metavar="ID")
+    actions.add_argument("--generate", action='store_true',
+                         help="Create a (temporary) local signature in the cache directory")
+    actions.add_argument("--autosubmit", action='store_true',
+                         help=("Go into auto-submit mode. In this mode, all remaining arguments are interpreted "
+                               "as the crashing command. This tool will automatically obtain GDB crash information "
+                               "and submit it."))
+    actions.add_argument("--download", type=int,
+                         help="Download the testcase for the specified crash entry", metavar="ID")
+    actions.add_argument("--download-all", type=int,
+                         help="Download all testcases for the specified signature entry", metavar="ID")
     actions.add_argument("--get-clientid", action='store_true', help="Print the client ID used when submitting issues")
 
     # Settings
@@ -351,21 +380,27 @@ def main(args=None):
     parser.add_argument("--clientid", help="Client ID to use when submitting issues", metavar="ID")
     parser.add_argument("--platform", help="Platform this crash appeared on", metavar="(x86|x86-64|arm)")
     parser.add_argument("--product", help="Product this crash appeared on", metavar="PRODUCT")
-    parser.add_argument("--productversion", dest="product_version", help="Product version this crash appeared on", metavar="VERSION")
+    parser.add_argument("--productversion", dest="product_version",
+                        help="Product version this crash appeared on", metavar="VERSION")
     parser.add_argument("--os", help="OS this crash appeared on", metavar="(windows|linux|macosx|b2g|android)")
     parser.add_argument("--tool", help="Name of the tool that found this issue", metavar="NAME")
-    parser.add_argument('--args', nargs='+', type=str, help="List of program arguments. Backslashes can be used for escaping and are stripped.")
+    parser.add_argument('--args', nargs='+', type=str,
+                        help="List of program arguments. Backslashes can be used for escaping and are stripped.")
     parser.add_argument('--env', nargs='+', type=str, help="List of environment variables in the form 'KEY=VALUE'")
     parser.add_argument('--metadata', nargs='+', type=str, help="List of metadata variables in the form 'KEY=VALUE'")
     parser.add_argument("--binary", help="Binary that has a configuration file for reading", metavar="BINARY")
 
     parser.add_argument("--testcase", help="File containing testcase", metavar="FILE")
-    parser.add_argument("--testcasequality", default=0, type=int, help="Integer indicating test case quality (%(default)s is best and default)", metavar="VAL")
+    parser.add_argument("--testcasequality", default=0, type=int,
+                        help="Integer indicating test case quality (%(default)s is best and default)", metavar="VAL")
 
     # Options that affect how signatures are generated
-    parser.add_argument("--forcecrashaddr", action='store_true', help="Force including the crash address into the signature")
-    parser.add_argument("--forcecrashinst", action='store_true', help="Force including the crash instruction into the signature (GDB only)")
-    parser.add_argument("--numframes", default=8, type=int, help="How many frames to include into the signature (default: %(default)s)")
+    parser.add_argument("--forcecrashaddr", action='store_true',
+                        help="Force including the crash address into the signature")
+    parser.add_argument("--forcecrashinst", action='store_true',
+                        help="Force including the crash instruction into the signature (GDB only)")
+    parser.add_argument("--numframes", default=8, type=int,
+                        help="How many frames to include into the signature (default: %(default)s)")
 
     parser.add_argument('rargs', nargs=argparse.REMAINDER)
 
@@ -390,7 +425,8 @@ def main(args=None):
             for idx, arg in enumerate(opts.rargs[1:]):
                 if os.path.exists(arg):
                     if testcase:
-                        parser.error("Multiple potential testcases specified on command line. Must explicitly specify test using --testcase.")
+                        parser.error("Multiple potential testcases specified on command line. "
+                                     "Must explicitly specify test using --testcase.")
                     testcase = arg
                     testcaseidx = idx
 
@@ -447,7 +483,8 @@ def main(args=None):
             if opts.platform is None or opts.product is None or opts.os is None:
                 parser.error("Must specify/configure at least --platform, --product and --os")
 
-            configuration = ProgramConfiguration(opts.product, opts.platform, opts.os, opts.product_version, env, args, metadata)
+            configuration = ProgramConfiguration(opts.product, opts.platform, opts.os, opts.product_version, env, args,
+                                                 metadata)
 
         if not opts.autosubmit:
             if opts.stderr is None and opts.crashdata is None:
@@ -476,7 +513,8 @@ def main(args=None):
         with open(opts.serverauthtokenfile) as f:
             serverauthtoken = f.read().rstrip()
 
-    collector = Collector(opts.sigdir, opts.serverhost, opts.serverport, opts.serverproto, serverauthtoken, opts.clientid, opts.tool)
+    collector = Collector(opts.sigdir, opts.serverhost, opts.serverport, opts.serverproto, serverauthtoken,
+                          opts.clientid, opts.tool)
 
     if opts.refresh:
         collector.refresh()
@@ -540,9 +578,23 @@ def main(args=None):
         print(retFile)
         return 0
 
+    if opts.download_all:
+        downloaded = False
+
+        for result in collector.download_all(opts.download_all):
+            downloaded = True
+            print(result)
+
+        if not downloaded:
+            print("Specified signature does not have any testcases", file=sys.stderr)
+            return 1
+
+        return 0
+
     if opts.get_clientid:
         print(collector.clientId)
         return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

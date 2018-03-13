@@ -3,18 +3,19 @@ from __future__ import unicode_literals, print_function
 
 import sys
 
-from django.db import models, migrations
-from django.conf import settings
+from django.db import models, migrations  # noqa
+from django.conf import settings  # noqa
+
 
 def create_migration_tool(apps, schema_editor):
     CrashEntry = apps.get_model("crashmanager", "CrashEntry")
-    
-    for entry in CrashEntry.objects.filter(crashAddressNumeric = None):
+
+    for entry in CrashEntry.objects.filter(crashAddressNumeric=None):
         try:
             entry.save()
-        except ValueError as e:
+        except ValueError:
             print("Failed to convert crash address value: %s" % entry.crashAddress, file=sys.stderr)
-    
+
 
 class Migration(migrations.Migration):
 

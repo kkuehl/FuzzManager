@@ -16,29 +16,26 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Ensure print() compatibility with Python 3
 from __future__ import print_function
-
-try:
-    import configparser
-except ImportError:
-    import ConfigParser as configparser
-
 import sys
+
+from six.moves import configparser
+
 
 class ConfigurationFiles():
     def __init__(self, configFiles):
         self.mainConfig = {}
         self.metadataConfig = {}
-        
+
         if configFiles:
             self.parser = configparser.ConfigParser()
-            
+
             # Make sure keys are kept case-sensitive
             self.parser.optionxform = str
-            
+
             self.parser.read(configFiles)
             self.mainConfig = self.getSectionMap("Main")
             self.metadataConfig = self.getSectionMap("Metadata")
-            
+
             # Produce warnings for unrecognized sections to make
             # debugging easier. Especially main vs. Main is hard
             # to figure out sometimes.
@@ -48,8 +45,7 @@ class ConfigurationFiles():
                     sections.remove(section)
             if sections:
                 print("Warning: Ignoring the following config file sections: %s" % " ".join(sections), file=sys.stderr)
-                
-        
+
     def getSectionMap(self, section):
         ret = {}
         try:

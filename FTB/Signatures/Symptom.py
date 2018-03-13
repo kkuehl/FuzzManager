@@ -19,16 +19,19 @@ from __future__ import print_function
 
 from abc import ABCMeta, abstractmethod
 import json
+
+import six
+
 from FTB.Signatures import JSONHelper
 from FTB.Signatures.Matchers import StringMatch, NumberMatch
 
+
+@six.add_metaclass(ABCMeta)
 class Symptom():
     '''
     Abstract base class that provides a method to instantiate the right sub class.
     It also supports generating a CrashSignature based on the stored information.
     '''
-    __metaclass__ = ABCMeta
-
     def __init__(self, jsonObj):
         # Store the original source so we can return it if someone wants to stringify us
         self.jsonsrc = json.dumps(jsonObj, indent=2)
@@ -48,7 +51,7 @@ class Symptom():
         @rtype: Symptom
         @return: Symptom subclass instance matching the given object
         '''
-        if not "type" in obj:
+        if "type" not in obj:
             raise RuntimeError("Missing symptom type in object")
 
         stype = obj["type"]
@@ -93,7 +96,7 @@ class OutputSymptom(Symptom):
         self.output = StringMatch(JSONHelper.getObjectOrStringChecked(obj, "value", True))
         self.src = JSONHelper.getStringChecked(obj, "src")
 
-        if self.src != None:
+        if self.src is not None:
             self.src = self.src.lower()
             if self.src != "stderr" and self.src != "stdout" and self.src != "crashdata":
                 raise RuntimeError("Invalid source specified: %s" % self.src)
@@ -110,7 +113,7 @@ class OutputSymptom(Symptom):
         '''
         checkedOutput = []
 
-        if self.src == None:
+        if self.src is None:
             checkedOutput.extend(crashInfo.rawStdout)
             checkedOutput.extend(crashInfo.rawStderr)
             checkedOutput.extend(crashInfo.rawCrashData)
@@ -127,6 +130,7 @@ class OutputSymptom(Symptom):
 
         return False
 
+
 class StackFrameSymptom(Symptom):
     def __init__(self, obj):
         '''
@@ -136,7 +140,7 @@ class StackFrameSymptom(Symptom):
         self.functionName = StringMatch(JSONHelper.getNumberOrStringChecked(obj, "functionName", True))
         self.frameNumber = JSONHelper.getNumberOrStringChecked(obj, "frameNumber")
 
-        if self.frameNumber != None:
+        if self.frameNumber is not None:
             self.frameNumber = NumberMatch(self.frameNumber)
         else:
             # Default to 0
@@ -161,6 +165,7 @@ class StackFrameSymptom(Symptom):
 
         return False
 
+
 class StackSizeSymptom(Symptom):
     def __init__(self, obj):
         '''
@@ -180,6 +185,7 @@ class StackSizeSymptom(Symptom):
         @return: True if the symptom matches, False otherwise
         '''
         return self.stackSize.matches(len(crashInfo.backtrace))
+
 
 class CrashAddressSymptom(Symptom):
     def __init__(self, obj):
@@ -203,6 +209,7 @@ class CrashAddressSymptom(Symptom):
         # the NumberMatch class will return false to not match.
         return self.address.matches(crashInfo.crashAddress)
 
+
 class InstructionSymptom(Symptom):
     def __init__(self, obj):
         '''
@@ -212,9 +219,9 @@ class InstructionSymptom(Symptom):
         self.registerNames = JSONHelper.getArrayChecked(obj, "registerNames")
         self.instructionName = JSONHelper.getObjectOrStringChecked(obj, "instructionName")
 
-        if self.instructionName != None:
+        if self.instructionName is not None:
             self.instructionName = StringMatch(self.instructionName)
-        elif self.registerNames == None or len(self.registerNames) == 0:
+        elif self.registerNames is None or len(self.registerNames) == 0:
             raise RuntimeError("Must provide at least instruction name or register names")
 
     def matches(self, crashInfo):
@@ -227,20 +234,21 @@ class InstructionSymptom(Symptom):
         @rtype: bool
         @return: True if the symptom matches, False otherwise
         '''
-        if crashInfo.crashInstruction == None:
+        if crashInfo.crashInstruction is None:
             # No crash instruction available, do not match
             return False
 
-        if self.registerNames != None:
+        if self.registerNames is not None:
             for register in self.registerNames:
-                if not register in crashInfo.crashInstruction:
+                if register not in crashInfo.crashInstruction:
                     return False
 
-        if self.instructionName != None:
+        if self.instructionName is not None:
             if not self.instructionName.matches(crashInfo.crashInstruction):
                 return False
 
         return True
+
 
 class TestcaseSymptom(Symptom):
     def __init__(self, obj):
@@ -262,7 +270,7 @@ class TestcaseSymptom(Symptom):
         '''
 
         # No testcase means to fail matching
-        if crashInfo.testcase == None:
+        if crashInfo.testcase is None:
             return False
 
         testLines = crashInfo.testcase.splitlines()
@@ -272,6 +280,7 @@ class TestcaseSymptom(Symptom):
                 return True
 
         return False
+
 
 class StackFramesSymptom(Symptom):
     def __init__(self, obj):
@@ -303,9 +312,9 @@ class StackFramesSymptom(Symptom):
         if self.matches(crashInfo):
             return (0, None)
 
-        for depth in range(1,4):
+        for depth in range(1, 4):
             (bestDepth, bestGuess) = StackFramesSymptom._diff(crashInfo.backtrace, self.functionNames, 0, 1, depth)
-            if bestDepth != None:
+            if bestDepth is not None:
                 guessedFunctionNames = [repr(x) for x in bestGuess]
 
                 # Remove trailing wildcards as they are of no use
@@ -316,7 +325,7 @@ class StackFramesSymptom(Symptom):
                     # Do not return empty matches. This happens if there's nothing left except wildcards.
                     return (None, None)
 
-                return (bestDepth, StackFramesSymptom({ "type": "stackFrames", 'functionNames' : guessedFunctionNames }))
+                return (bestDepth, StackFramesSymptom({"type": "stackFrames", 'functionNames': guessedFunctionNames}))
 
         return (None, None)
 
@@ -332,7 +341,7 @@ class StackFramesSymptom(Symptom):
 
         hasVariableStackLengthQuantifier = '???' in [str(x) for x in newSignatureGuess]
 
-        for idx in range(startIdx,len(newSignatureGuess)):
+        for idx in range(startIdx, len(newSignatureGuess)):
             newSignatureGuess.insert(idx, singleWildcardMatch)
 
             # Check if we have a match with our modification
@@ -342,9 +351,10 @@ class StackFramesSymptom(Symptom):
             # If we don't have a match but we're not at our current depth limit,
             # add one more level of depth for our search.
             if depth < maxDepth:
-                (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx, depth+1, maxDepth)
+                (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx,
+                                                                        depth + 1, maxDepth)
 
-                if newBestDepth != None and (bestDepth == None or newBestDepth < bestDepth):
+                if newBestDepth is not None and (bestDepth is None or newBestDepth < bestDepth):
                     bestDepth = newBestDepth
                     bestGuess = newBestGuess
 
@@ -384,9 +394,10 @@ class StackFramesSymptom(Symptom):
             # If we don't have a match but we're not at our current depth limit,
             # add one more level of depth for our search.
             if depth < maxDepth:
-                (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx, depth+1, maxDepth)
+                (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx,
+                                                                        depth + 1, maxDepth)
 
-                if newBestDepth != None and (bestDepth == None or newBestDepth < bestDepth):
+                if newBestDepth is not None and (bestDepth is None or newBestDepth < bestDepth):
                     bestDepth = newBestDepth
                     bestGuess = newBestGuess
 

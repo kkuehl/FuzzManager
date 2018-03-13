@@ -110,6 +110,7 @@ def getAssertion(output):
 
     return lastLine
 
+
 def getAuxiliaryAbortMessage(output):
     '''
     This helper method provides a way to extract and process additional
@@ -128,7 +129,7 @@ def getAuxiliaryAbortMessage(output):
         line = re.sub("^\\[\\d+\\]\\s+", "", line, count=1)
 
         if "ERROR: AddressSanitizer" in line:
-            if not "SEGV on unknown address" in line:
+            if "SEGV on unknown address" not in line:
                 # Strip address, registers and PID prefix
                 line = re.sub(r"on address 0x[0-9a-f]+", "", line)
                 line = re.sub(r"(at |\()pc 0x[0-9a-f]+", "", line)
@@ -139,7 +140,7 @@ def getAuxiliaryAbortMessage(output):
                 lastLine = line.strip()
                 needASanRW = True
         elif needASanRW and "READ of size" in line or "WRITE of size" in line:
-            lastLine = [ lastLine ]
+            lastLine = [lastLine]
             lastLine.append(line)
             needASanRW = False
         elif "glibc detected" in line:
@@ -164,12 +165,11 @@ def getSanitizedAssertionPattern(msgs):
     @rtype: string
     @return: Sanitized assertion message (regular expression)
     '''
-    assert msgs != None
-
+    assert msgs is not None
 
     returnList = True
     if not isinstance(msgs, list):
-        msgs = [ msgs ]
+        msgs = [msgs]
         returnList = False
 
     sanitizedMsgs = []
@@ -234,7 +234,7 @@ def escapePattern(msg):
 
     escapedStr = msg
 
-    activeChars = [ "\\", "[", "]", "{", "}", "(", ")", "*", "+", "-", "?", "^", "$", ".", "|" ]
+    activeChars = ["\\", "[", "]", "{", "}", "(", ")", "*", "+", "-", "?", "^", "$", ".", "|"]
 
     for activeChar in activeChars:
         escapedStr = escapedStr.replace(activeChar, "\\" + activeChar)

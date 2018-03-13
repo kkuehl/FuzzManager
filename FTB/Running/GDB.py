@@ -13,28 +13,35 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 @contact:    choller@mozilla.com
 '''
+from __future__ import print_function
+
 
 def is64bit():
-    return not str(gdb.parse_and_eval("$rax"))=="void"  # @UndefinedVariable
+    return not str(gdb.parse_and_eval("$rax")) == "void"  # noqa @UndefinedVariable
+
 
 def isARM():
-    return not str(gdb.parse_and_eval("$r0"))=="void" # @UndefinedVariable
+    return not str(gdb.parse_and_eval("$r0")) == "void"  # noqa @UndefinedVariable
+
 
 def regAsHexStr(reg):
     if is64bit():
         mask = 0xffffffffffffffff
     else:
         mask = 0xffffffff
-    return "0x%x"%(int(str(gdb.parse_and_eval("$" + reg)),0) & mask) # @UndefinedVariable
+    return "0x%x" % (int(str(gdb.parse_and_eval("$" + reg)), 0) & mask)  # noqa @UndefinedVariable
+
 
 def regAsIntStr(reg):
-    return str(int(str(gdb.parse_and_eval("$" + reg)),0)) # @UndefinedVariable
+    return str(int(str(gdb.parse_and_eval("$" + reg)), 0))  # noqa @UndefinedVariable
+
 
 def regAsRaw(reg):
-    return str(gdb.parse_and_eval("$" + reg)) # @UndefinedVariable
+    return str(gdb.parse_and_eval("$" + reg))  # noqa @UndefinedVariable
+
 
 def printImportantRegisters():
-    if is64bit(): 
+    if is64bit():
         regs = "rax rbx rcx rdx rsi rdi rbp rsp r8 r9 r10 r11 r12 r13 r14 r15 rip".split(" ")
     elif isARM():
         regs = "r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 sp lr pc cpsr".split(" ")
@@ -44,5 +51,5 @@ def printImportantRegisters():
     for reg in regs:
         try:
             print(reg + "\t" + regAsHexStr(reg) + "\t" + regAsIntStr(reg))
-        except:
+        except Exception:
             print(reg + "\t" + regAsRaw(reg))

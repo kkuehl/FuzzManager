@@ -37,7 +37,10 @@ def _check_hg():
     except OSError:  # FileNotFoundError
         pass
     return False
+
+
 HAVE_HG = _check_hg()
+
 
 def _check_git():
     try:
@@ -48,6 +51,8 @@ def _check_git():
     except OSError:  # FileNotFoundError
         pass
     return False
+
+
 HAVE_GIT = _check_git()
 
 
@@ -101,7 +106,7 @@ class TestCase(DjangoTestCase):
         path = os.getcwd()
         try:
             os.chdir(repo.location)
-            return subprocess.check_output(["hg"] + list(args))
+            return subprocess.check_output(["hg"] + list(args)).decode("utf-8")
         finally:
             os.chdir(path)
 
@@ -109,7 +114,7 @@ class TestCase(DjangoTestCase):
         path = os.getcwd()
         try:
             os.chdir(repo.location)
-            return subprocess.check_output(["git"] + list(args))
+            return subprocess.check_output(["git"] + list(args)).decode("utf-8")
         finally:
             os.chdir(path)
 

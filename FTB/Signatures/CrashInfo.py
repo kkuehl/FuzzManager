@@ -25,25 +25,20 @@ import os
 import re
 import sys
 
+import six
+
 from FTB import AssertionHelper
 from FTB.ProgramConfiguration import ProgramConfiguration
 from FTB.Signatures import RegisterHelper
 from FTB.Signatures.CrashSignature import CrashSignature
 
 
-if sys.version_info.major == 3:
-    unicode_ = str
-else:
-    unicode_ = unicode
-
-
+@six.add_metaclass(ABCMeta)
 class CrashInfo():
     '''
     Abstract base class that provides a method to instantiate the right sub class.
     It also supports generating a CrashSignature based on the stored information.
     '''
-    __metaclass__ = ABCMeta
-
     def __init__(self):
         # Store the raw data
         self.rawStdout = []
@@ -134,19 +129,19 @@ class CrashInfo():
         @return: Crash information object
         '''
 
-        assert stdout is None or isinstance(stdout, (list, unicode_, bytes))
-        assert stderr is None or isinstance(stderr, (list, unicode_, bytes))
-        assert auxCrashData is None or isinstance(auxCrashData, (list, unicode_, bytes))
+        assert stdout is None or isinstance(stdout, (list, six.text_type, bytes))
+        assert stderr is None or isinstance(stderr, (list, six.text_type, bytes))
+        assert auxCrashData is None or isinstance(auxCrashData, (list, six.text_type, bytes))
 
         assert isinstance(configuration, ProgramConfiguration)
 
-        if isinstance(stdout, (unicode_, bytes)):
+        if isinstance(stdout, (six.text_type, bytes)):
             stdout = stdout.splitlines()
 
-        if isinstance(stderr, (unicode_, bytes)):
+        if isinstance(stderr, (six.text_type, bytes)):
             stderr = stderr.splitlines()
 
-        if isinstance(auxCrashData, (unicode_, bytes)):
+        if isinstance(auxCrashData, (six.text_type, bytes)):
             auxCrashData = auxCrashData.splitlines()
 
         if cacheObject is not None:
@@ -243,7 +238,7 @@ class CrashInfo():
         if not abortMsg and self.rawCrashData:
             abortMsg = AssertionHelper.getAssertion(self.rawCrashData)
 
-        if abortMsg != None:
+        if abortMsg is not None:
             if isinstance(abortMsg, list):
                 return " ".join(abortMsg)
             else:
@@ -254,7 +249,8 @@ class CrashInfo():
 
         return "[@ %s]" % self.backtrace[0]
 
-    def createCrashSignature(self, forceCrashAddress=False, forceCrashInstruction=False, maxFrames=8, minimumSupportedVersion=13):
+    def createCrashSignature(self, forceCrashAddress=False, forceCrashInstruction=False, maxFrames=8,
+                             minimumSupportedVersion=13):
         '''
         @param forceCrashAddress: If True, the crash address will be included in any case
         @type forceCrashAddress: bool
@@ -289,7 +285,7 @@ class CrashInfo():
             # only on version 1.3 or higher, because the "crashdata" source
             # type for output matching was added in that version.
             abortMsgs = AssertionHelper.getAssertion(self.rawCrashData)
-            if abortMsgs != None:
+            if abortMsgs is not None:
                 abortMsgInCrashdata = True
 
         # Still no abort message, fall back to auxiliary abort messages (ASan/UBSan)
@@ -301,10 +297,10 @@ class CrashInfo():
             # only on version 1.3 or higher, because the "crashdata" source
             # type for output matching was added in that version.
             abortMsgs = AssertionHelper.getAuxiliaryAbortMessage(self.rawCrashData)
-            if abortMsgs != None:
+            if abortMsgs is not None:
                 abortMsgInCrashdata = True
 
-        if abortMsgs != None:
+        if abortMsgs is not None:
             if not isinstance(abortMsgs, list):
                 abortMsgs = [abortMsgs]
 
@@ -319,10 +315,10 @@ class CrashInfo():
                 # for anything newer, use the short form with forward slashes
                 # to increase the readability of the signatures.
                 if minimumSupportedVersion < 12:
-                    stringObj = { "value" : abortMsg, "matchType" : "pcre" }
-                    symptomObj = { "type" : "output", "src" : abortMsgSrc, "value" : stringObj }
+                    stringObj = {"value": abortMsg, "matchType": "pcre"}
+                    symptomObj = {"type": "output", "src": abortMsgSrc, "value": stringObj}
                 else:
-                    symptomObj = { "type" : "output", "src" : abortMsgSrc, "value" : "/%s/" % abortMsg }
+                    symptomObj = {"type": "output", "src": abortMsgSrc, "value": "/%s/" % abortMsg}
                 symptomArr.append(symptomObj)
 
         # Consider the first four frames as top stack
@@ -345,7 +341,7 @@ class CrashInfo():
             for idx in range(0, numFrames):
                 functionName = self.backtrace[idx]
                 if not functionName == "??":
-                    symptomObj = { "type" : "stackFrame", "frameNumber" : idx, "functionName" : functionName }
+                    symptomObj = {"type": "stackFrame", "frameNumber": idx, "functionName": functionName}
                     symptomArr.append(symptomObj)
                 elif idx < 4:
                     # If we're in the top 4, we count this as a miss
@@ -368,7 +364,7 @@ class CrashInfo():
                 if str(framesArray[frameIdx]) != '?':
                     lastSymbolizedFrame = frameIdx
 
-            if lastSymbolizedFrame != None:
+            if lastSymbolizedFrame is not None:
                 # Remove all elements behind the last symbolized frame
                 framesArray = framesArray[:lastSymbolizedFrame + 1]
             else:
@@ -377,13 +373,22 @@ class CrashInfo():
                 framesArray = []
 
             if framesArray:
-                symptomArr.append({ "type" : "stackFrames", "functionNames" : framesArray })
+                symptomArr.append({"type": "stackFrames", "functionNames": framesArray})
 
         # Missing too much of the top stack frames, add additional crash information
-        stackIsInsufficient = topStackMissCount >= 2 and abortMsgs == None
+        stackIsInsufficient = topStackMissCount >= 2 and abortMsgs is None
 
         includeCrashAddress = stackIsInsufficient or forceCrashAddress
-        includeCrashInstruction = (stackIsInsufficient and self.crashInstruction != None) or forceCrashInstruction
+        includeCrashInstruction = (stackIsInsufficient and self.crashInstruction is not None) or forceCrashInstruction
+
+        if not symptomArr and not includeCrashInstruction:
+            # If at this point, we don't have any symptoms from either backtrace
+            # or abort messages and we also lack a crash instruction, then the
+            # the only potential symptom that remains is the crash address.
+            # That symptom alone would in most cases be too broad for an automatically
+            # generated signature, so we stop at this point.
+            self.failureReason = "Insufficient data to generate crash signature."
+            return None
 
         if includeCrashAddress:
             if self.crashAddress is None:
@@ -395,19 +400,19 @@ class CrashInfo():
             else:
                 crashAddress = "> 0xFF"
 
-            crashAddressSymptomObj = { "type" : "crashAddress", "address" : crashAddress }
+            crashAddressSymptomObj = {"type": "crashAddress", "address": crashAddress}
             symptomArr.append(crashAddressSymptomObj)
 
         if includeCrashInstruction:
-            if self.crashInstruction == None:
+            if self.crashInstruction is None:
                 failureReason = self.failureReason
                 self.failureReason = "No crash instruction available from crash data. Reason: %s" % failureReason
                 return None
 
-            crashInstructionSymptomObj = { "type" : "instruction", "instructionName" : self.crashInstruction }
+            crashInstructionSymptomObj = {"type": "instruction", "instructionName": self.crashInstruction}
             symptomArr.append(crashInstructionSymptomObj)
 
-        sigObj = { "symptoms" : symptomArr }
+        sigObj = {"symptoms": symptomArr}
 
         return CrashSignature(json.dumps(sigObj, indent=2))
 
@@ -454,6 +459,7 @@ class CrashInfo():
 
         return frame
 
+
 class NoCrashInfo(CrashInfo):
     def __init__(self, stdout, stderr, configuration, crashData=None):
         '''
@@ -461,13 +467,13 @@ class NoCrashInfo(CrashInfo):
         '''
         CrashInfo.__init__(self)
 
-        if stdout != None:
+        if stdout is not None:
             self.rawStdout.extend(stdout)
 
-        if stderr != None:
+        if stderr is not None:
             self.rawStderr.extend(stderr)
 
-        if crashData != None:
+        if crashData is not None:
             self.rawCrashData.extend(crashData)
 
         self.configuration = configuration
@@ -503,7 +509,7 @@ class ASanCrashInfo(CrashInfo):
                                        |not\smalloc\(\)-ed:     # Used in case of a wild free (on unallocated memory)
                                        |not\sowned:             # Used when calling __asan_get_allocated_size() on a pointer that isn't owned
                                        |memcpy-param-overlap:\smemory\sranges\s\[) # Bad memcpy
-                                   (\s*0x([0-9a-f]+))?"""
+                                   (\s*0x([0-9a-f]+))?"""  # noqa
         asanRegisterPattern = r"(?:\s+|\()pc\s+0x([0-9a-f]+)\s+(sp|bp)\s+0x([0-9a-f]+)\s+(sp|bp)\s+0x([0-9a-f]+)"
 
         expectedIndex = 0
@@ -519,7 +525,7 @@ class ASanCrashInfo(CrashInfo):
                 try:
                     self.crashAddress = int(match.group(1), 16)
                 except TypeError:
-                    pass # No crash address available
+                    pass  # No crash address available
 
                 # Crash Address and Registers are in the same line for ASan
                 match = re.search(asanRegisterPattern, traceLine)
@@ -564,12 +570,6 @@ class ASanCrashInfo(CrashInfo):
             self.backtrace.append(CrashInfo.sanitizeStackFrame(component))
             expectedIndex += 1
 
-        if not self.backtrace and self.crashAddress is not None:
-            # We've seen the crash address but no frames, so this is likely
-            # a crash on the heap with no symbols available. Add one artificial
-            # frame so it doesn't show up as "No crash detected"
-            self.backtrace.append("??")
-
     def createShortSignature(self):
         '''
         @rtype: String
@@ -583,7 +583,7 @@ class ASanCrashInfo(CrashInfo):
         if not abortMsg and self.rawCrashData:
             abortMsg = AssertionHelper.getAssertion(self.rawCrashData)
 
-        if abortMsg != None:
+        if abortMsg is not None:
             if isinstance(abortMsg, list):
                 return " ".join(abortMsg)
             else:
@@ -597,7 +597,7 @@ class ASanCrashInfo(CrashInfo):
         if not abortMsg and self.rawCrashData:
             abortMsg = AssertionHelper.getAuxiliaryAbortMessage(self.rawCrashData)
 
-        if abortMsg != None:
+        if abortMsg is not None:
             rwMsg = None
             if isinstance(abortMsg, list):
                 asanMsg = abortMsg[0]
@@ -611,7 +611,8 @@ class ASanCrashInfo(CrashInfo):
             # Strip various forms of special thread information and messages
             asanMsg = re.sub(" in thread T.+", "", asanMsg)
             asanMsg = re.sub(" malloc\(\)\-ed: 0x[0-9a-f]+", r" malloc()-ed", asanMsg)
-            asanMsg = re.sub(r"\[0x[0-9a-f]+,0x[0-9a-f]+\) and \[0x[0-9a-f]+, 0x[0-9a-f]+\) overlap", "overlap", asanMsg)
+            asanMsg = re.sub(r"\[0x[0-9a-f]+,0x[0-9a-f]+\) and \[0x[0-9a-f]+, 0x[0-9a-f]+\) overlap",
+                             "overlap", asanMsg)
 
             if len(self.backtrace):
                 asanMsg += " [@ %s]" % self.backtrace[0]
@@ -623,9 +624,14 @@ class ASanCrashInfo(CrashInfo):
             return asanMsg
 
         if not len(self.backtrace):
+            if self.crashAddress is not None:
+                # We seem to have a crash but no backtrace, so let it show up as a crash with no symbols
+                return "[@ ??]"
+
             return "No crash detected"
 
         return "[@ %s]" % self.backtrace[0]
+
 
 class UBSanCrashInfo(CrashInfo):
     def __init__(self, stdout, stderr, configuration, crashData=None):
@@ -666,7 +672,8 @@ class UBSanCrashInfo(CrashInfo):
             index = int(parts[0][1:])
 
             if expectedIndex != index:
-                raise RuntimeError("Fatal error parsing UBSan trace (Index mismatch, got index %s but expected %s)" % (index, expectedIndex))
+                raise RuntimeError("Fatal error parsing UBSan trace (Index mismatch, got index %s but expected %s)" %
+                                   (index, expectedIndex))
 
             component = None
             if len(parts) > 2:
@@ -710,6 +717,7 @@ class UBSanCrashInfo(CrashInfo):
 
         return "UndefinedBehaviorSanitizer: [@ %s]" % self.backtrace[0]
 
+
 class GDBCrashInfo(CrashInfo):
     def __init__(self, stdout, stderr, configuration, crashData=None):
         '''
@@ -717,13 +725,13 @@ class GDBCrashInfo(CrashInfo):
         '''
         CrashInfo.__init__(self)
 
-        if stdout != None:
+        if stdout is not None:
             self.rawStdout.extend(stdout)
 
-        if stderr != None:
+        if stderr is not None:
             self.rawStderr.extend(stderr)
 
-        if crashData != None:
+        if crashData is not None:
             self.rawCrashData.extend(crashData)
 
         self.configuration = configuration
@@ -753,35 +761,36 @@ class GDBCrashInfo(CrashInfo):
             # buffer content. If we detect this constellation, then it's highly likely
             # that we have a valid trace line but no pattern that fits it. We need
             # to make sure that we report this.
-            if not pastFrames and re.match("\\s*#\\d+.+", lastLineBuf) != None and re.match("\\s*#\\d+.+", traceLine) != None:
+            if (not pastFrames and re.match("\\s*#\\d+.+", lastLineBuf) is not None and
+                    re.match("\\s*#\\d+.+", traceLine) is not None):
                 print("Fatal error parsing this GDB trace line:", file=sys.stderr)
                 print(lastLineBuf, file=sys.stderr)
                 raise RuntimeError("Fatal error parsing GDB trace")
 
             if not len(lastLineBuf):
                 match = re.search(gdbRegisterPattern, traceLine)
-                if match != None:
+                if match is not None:
                     pastFrames = True
                     register = match.group(1)
                     value = int(match.group(2), 16)
                     self.registers[register] = value
                 else:
                     match = re.search(gdbCrashAddressPattern, traceLine)
-                    if match != None:
+                    if match is not None:
                         self.crashAddress = int(match.group(1), 16)
                     else:
                         match = re.search(gdbCrashInstructionPattern, traceLine)
-                        if match != None:
+                        if match is not None:
                             self.crashInstruction = match.group(1)
 
                             # In certain cases, the crash instruction can have
                             # trailing function information, strip it here.
                             match = re.search("(\\s+<.+>\\s*)$", self.crashInstruction)
-                            if match != None:
+                            if match is not None:
                                 self.crashInstruction = self.crashInstruction.replace(match.group(1), "")
 
             if not pastFrames:
-                if not len(lastLineBuf) and re.match("\\s*#\\d+.+", traceLine) == None:
+                if not len(lastLineBuf) and re.match("\\s*#\\d+.+", traceLine) is None:
                     # Skip additional lines
                     continue
 
@@ -792,12 +801,12 @@ class GDBCrashInfo(CrashInfo):
 
                 for gdbPattern in gdbFramePatterns:
                     match = re.search(gdbPattern, lastLineBuf)
-                    if match != None:
+                    if match is not None:
                         frameIndex = int(match.group(1))
                         functionName = match.group(3)
                         break
 
-                if frameIndex == None:
+                if frameIndex is None:
                     # Line might not be complete yet, try adding the next
                     continue
                 else:
@@ -808,7 +817,8 @@ class GDBCrashInfo(CrashInfo):
                 if len(self.backtrace) != frameIndex and frameIndex == 0:
                     self.backtrace.pop(0)
                 elif len(self.backtrace) != frameIndex:
-                    print("Fatal error parsing this GDB trace (Index mismatch, wanted %s got %s ): " % (len(self.backtrace), frameIndex), file=sys.stderr)
+                    print("Fatal error parsing this GDB trace (Index mismatch, wanted %s got %s ): " %
+                          (len(self.backtrace), frameIndex), file=sys.stderr)
                     print(os.linesep.join(gdbOutput), file=sys.stderr)
                     raise RuntimeError("Fatal error parsing GDB trace")
 
@@ -821,21 +831,21 @@ class GDBCrashInfo(CrashInfo):
 
                 self.backtrace.append(functionName)
 
-        if self.crashInstruction != None:
+        if self.crashInstruction is not None:
             # Remove any leading/trailing whitespaces
             self.crashInstruction = self.crashInstruction.strip()
 
         # If we have no crash address but the instruction, try to calculate the crash address
-        if self.crashAddress == None and self.crashInstruction != None:
+        if self.crashAddress is None and self.crashInstruction is not None:
             crashAddress = GDBCrashInfo.calculateCrashAddress(self.crashInstruction, self.registers)
 
-            if isinstance(crashAddress, (unicode_, bytes)):
+            if isinstance(crashAddress, (six.text_type, bytes)):
                 self.failureReason = crashAddress
                 return
 
             self.crashAddress = crashAddress
 
-            if self.crashAddress != None and self.crashAddress < 0:
+            if self.crashAddress is not None and self.crashAddress < 0:
                 if RegisterHelper.getBitWidth(self.registers) == 32:
                     self.crashAddress = uint32(self.crashAddress)
                 else:
@@ -887,7 +897,6 @@ class GDBCrashInfo(CrashInfo):
             else:
                 raise RuntimeError("Unsupported non-operand instruction: %s" % instruction)
 
-
         if len(parts) != 2:
             raise RuntimeError("Failed to split instruction and operands apart: %s" % crashInstruction)
 
@@ -918,7 +927,7 @@ class GDBCrashInfo(CrashInfo):
 
         def calculateDerefOpAddress(derefOp):
             match = re.match("\*?((?:\\-?0x[0-9a-f]+)?)\\(%([a-z0-9]+)\\)", derefOp)
-            if match != None:
+            if match is not None:
                 offset = 0
                 if len(match.group(1)):
                     offset = int(match.group(1), 16)
@@ -926,7 +935,7 @@ class GDBCrashInfo(CrashInfo):
                 val = RegisterHelper.getRegisterValue(match.group(2), registerMap)
 
                 # If we don't have the value, return None
-                if val == None:
+                if val is None:
                     return (None, "Missing value for register %s " % match.group(2))
                 else:
                     if RegisterHelper.getBitWidth(registerMap) == 32:
@@ -977,7 +986,7 @@ class GDBCrashInfo(CrashInfo):
                     derefOp = parts[0]
 
                 if isDerefOp(parts[1]):
-                    if derefOp != None:
+                    if derefOp is not None:
                         if ":(" in parts[1]:
                             # This can be an instruction using multiple segments, like:
                             #
@@ -986,7 +995,7 @@ class GDBCrashInfo(CrashInfo):
                             #  (gdb) p $_siginfo._sifields._sigfault.si_addr
                             #    $1 = (void *) 0x7ff846e64d28
                             #    (gdb) x /i $pc
-                            #    => 0x876b40 <js::ArgumentsObject::create<CopyFrameArgs>(JSContext*, JS::HandleScript, JS::HandleFunction, unsigned int, CopyFrameArgs&)+528>:   movsq  %ds:(%rsi),%es:(%rdi)
+                            #    => 0x876b40 <js::ArgumentsObject::create<CopyFrameArgs>(JSContext*, JS::HandleScript, JS::HandleFunction, unsigned int, CopyFrameArgs&)+528>:   movsq  %ds:(%rsi),%es:(%rdi)  # noqa
                             #    (gdb) info reg $ds
                             #    ds             0x0      0
                             #    (gdb) info reg $es
@@ -1005,14 +1014,15 @@ class GDBCrashInfo(CrashInfo):
 
                     derefOp = parts[1]
 
-                if derefOp != None:
+                if derefOp is not None:
                         (val, failed) = calculateDerefOpAddress(derefOp)
                         if failed:
                             failureReason = failed
                         else:
                             return val
                 else:
-                    failureReason = "Failed to decode two-operand instruction: No dereference operation or hardcoded address detected."
+                    failureReason = ("Failed to decode two-operand instruction: No dereference operation or "
+                                     "hardcoded address detected.")
                     # We might still be reading from/writing to a hardcoded address.
                     # Note that it's not possible to have two hardcoded addresses
                     # in one instruction, one operand must be a register or immediate
@@ -1023,7 +1033,7 @@ class GDBCrashInfo(CrashInfo):
 
                     for x in (parts[1], parts[0]):
                         result = re.match("\\$?(\\-?0x[0-9a-f]+)", x)
-                        if result != None:
+                        if result is not None:
                             return int(result.group(1), 16)
             elif len(parts) == 3:
                 # Example instruction: shrb   -0x69(%rdx,%rbx,8)
@@ -1032,26 +1042,27 @@ class GDBCrashInfo(CrashInfo):
 
                     (result, reason) = GDBCrashInfo.calculateComplexDerefOpAddress(complexDerefOp, registerMap)
 
-                    if result == None:
+                    if result is None:
                         failureReason = reason
                     else:
                         return result
                 else:
                     raise RuntimeError("Unexpected instruction pattern: %s" % crashInstruction)
             elif len(parts) == 4:
-                if "(" in parts[0] and not ")" in parts[0]:
+                if "(" in parts[0] and ")" not in parts[0]:
                     complexDerefOp = parts[0] + "," + parts[1] + "," + parts[2]
-                elif not "(" in parts[0] and not ")" in parts[0]:
+                elif "(" not in parts[0] and ")" not in parts[0]:
                     complexDerefOp = parts[1] + "," + parts[2] + "," + parts[3]
 
                 (result, reason) = GDBCrashInfo.calculateComplexDerefOpAddress(complexDerefOp, registerMap)
 
-                if result == None:
+                if result is None:
                     failureReason = reason
                 else:
                     return result
             else:
-                raise RuntimeError("Unexpected length after splitting operands of this instruction: %s" % crashInstruction)
+                raise RuntimeError("Unexpected length after splitting operands of this instruction: %s" %
+                                   crashInstruction)
         else:
             failureReason = "Architecture is not supported."
 
@@ -1063,7 +1074,7 @@ class GDBCrashInfo(CrashInfo):
     def calculateComplexDerefOpAddress(complexDerefOp, registerMap):
 
         match = re.match("((?:\\-?0x[0-9a-f]+)?)\\(%([a-z0-9]+),%([a-z0-9]+),([0-9]+)\\)", complexDerefOp)
-        if match != None:
+        if match is not None:
             offset = 0
             if len(match.group(1)) > 0:
                 offset = int(match.group(1), 16)
@@ -1074,8 +1085,8 @@ class GDBCrashInfo(CrashInfo):
             mult = int(match.group(4), 16)
 
             # If we're missing any of the two register values, return None
-            if regA == None or regB == None:
-                if regA == None:
+            if regA is None or regB is None:
+                if regA is None:
                     return (None, "Missing value for register %s" % match.group(2))
                 else:
                     return (None, "Missing value for register %s" % match.group(3))
@@ -1097,13 +1108,13 @@ class MinidumpCrashInfo(CrashInfo):
         '''
         CrashInfo.__init__(self)
 
-        if stdout != None:
+        if stdout is not None:
             self.rawStdout.extend(stdout)
 
-        if stderr != None:
+        if stderr is not None:
             self.rawStderr.extend(stderr)
 
-        if crashData != None:
+        if crashData is not None:
             self.rawCrashData.extend(crashData)
 
         self.configuration = configuration
@@ -1116,7 +1127,7 @@ class MinidumpCrashInfo(CrashInfo):
 
         crashThread = None
         for traceLine in minidumpOuput:
-            if crashThread != None:
+            if crashThread is not None:
                 if traceLine.startswith("%s|" % crashThread):
                     components = traceLine.split("|")
 
@@ -1146,13 +1157,13 @@ class AppleCrashInfo(CrashInfo):
         '''
         CrashInfo.__init__(self)
 
-        if stdout != None:
+        if stdout is not None:
             self.rawStdout.extend(stdout)
 
-        if stderr != None:
+        if stderr is not None:
             self.rawStderr.extend(stderr)
 
-        if crashData != None:
+        if crashData is not None:
             self.rawCrashData.extend(crashData)
 
         self.configuration = configuration
@@ -1179,7 +1190,7 @@ class AppleCrashInfo(CrashInfo):
 
             if inCrashingThread:
                 # Example:
-                # 0   js-dbg-64-dm-darwin-a523d4c7efe2    0x00000001004b04c4 js::jit::MacroAssembler::Pop(js::jit::Register) + 180 (MacroAssembler-inl.h:50)
+                # 0   js-dbg-64-dm-darwin-a523d4c7efe2    0x00000001004b04c4 js::jit::MacroAssembler::Pop(js::jit::Register) + 180 (MacroAssembler-inl.h:50)  # noqa
                 components = line.split(None, 3)
                 stackEntry = components[3]
                 if stackEntry.startswith('0'):
@@ -1316,9 +1327,9 @@ class CDBCrashInfo(CrashInfo):
 
             if inCrashingThread:
                 # 32-bit example:
-                #     016fdc38 004b2387 01e104e8 016fe490 016fe490 js_32_dm_windows_62f79d676e0e!JSObject::allocKindForTenure+0x9
+                #     016fdc38 004b2387 01e104e8 016fe490 016fe490 js_32_dm_windows_62f79d676e0e!JSObject::allocKindForTenure+0x9  # noqa
                 # 64-bit example:
-                #     000000e8`7fbfc040 00007ff7`4d53a984 : 000000e8`7fbfc2c0 00000285`ef7bb400 00000285`ef21b000 00007ff7`4d4254b9 : js_64_dm_windows_62f79d676e0e!JSObject::allocKindForTenure+0x13
+                #     000000e8`7fbfc040 00007ff7`4d53a984 : 000000e8`7fbfc2c0 00000285`ef7bb400 00000285`ef21b000 00007ff7`4d4254b9 : js_64_dm_windows_62f79d676e0e!JSObject::allocKindForTenure+0x13  # noqa
                 if "STACK_COMMAND" in line or "SYMBOL_NAME" in line \
                         or "THREAD_SHA1_HASH_MOD_FUNC" in line or "FAULTING_SOURCE_CODE" in line:
                     inCrashingThread = False
@@ -1350,7 +1361,8 @@ class CDBCrashInfo(CrashInfo):
 
 class RustCrashInfo(CrashInfo):
 
-    RE_FRAME = re.compile(r"^( +\d+:( +0x[0-9a-f]+ -)? (?P<symbol>.+?)(::h[0-9a-f]{16})?|\s+at ([A-Za-z]:)?(/[A-Za-z0-9_ .]+)+:\d+)$")
+    RE_FRAME = re.compile(r"^( +\d+:( +0x[0-9a-f]+ -)? (?P<symbol>.+?)"
+                          r"(::h[0-9a-f]{16})?|\s+at ([A-Za-z]:)?(/[A-Za-z0-9_ .]+)+:\d+)$")
 
     def __init__(self, stdout, stderr, configuration, crashData=None):
         '''
@@ -1358,13 +1370,13 @@ class RustCrashInfo(CrashInfo):
         '''
         CrashInfo.__init__(self)
 
-        if stdout != None:
+        if stdout is not None:
             self.rawStdout.extend(stdout)
 
-        if stderr != None:
+        if stderr is not None:
             self.rawStderr.extend(stderr)
 
-        if crashData != None:
+        if crashData is not None:
             self.rawCrashData.extend(crashData)
 
         self.configuration = configuration
@@ -1372,7 +1384,7 @@ class RustCrashInfo(CrashInfo):
         # If crashData is given, use that to find the rust backtrace, otherwise use stderr
         rustOutput = crashData or stderr
 
-        self.crashAddress = 0 # this is always an assertion, set to 0 to make matching more efficient
+        self.crashAddress = 0  # this is always an assertion, set to 0 to make matching more efficient
 
         inAssertion = False
         inBacktrace = False

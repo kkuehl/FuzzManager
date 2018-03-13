@@ -1,4 +1,4 @@
-from django.core.exceptions import MultipleObjectsReturned
+from django.core.exceptions import MultipleObjectsReturned  # noqa
 from django.core.files.base import ContentFile
 import hashlib
 from rest_framework import serializers
@@ -7,8 +7,10 @@ from rest_framework.exceptions import APIException
 from crashmanager.models import Client, Tool
 from .models import Collection, CollectionFile, Repository
 
+
 class InvalidArgumentException(APIException):
     status_code = 400
+
 
 class CollectionSerializer(serializers.ModelSerializer):
     # We need to redefine several fields explicitly because we flatten our
@@ -25,9 +27,9 @@ class CollectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Collection
         fields = (
-                  'repository', 'revision', 'branch', 'tools',
-                  'client', 'coverage', 'description', 'id', 'created'
-                  )
+            'repository', 'revision', 'branch', 'tools',
+            'client', 'coverage', 'description', 'id', 'created'
+        )
         read_only_fields = ('id', 'created')
 
     def to_representation(self, obj):
@@ -76,7 +78,7 @@ class CollectionSerializer(serializers.ModelSerializer):
         coverage = attrs.pop('coverage')['file']
 
         h = hashlib.new('sha1')
-        h.update(repr(coverage))
+        h.update(repr(coverage).encode('utf-8'))
 
         dbobj = CollectionFile()
         dbobj.file.save("%s.coverage" % h.hexdigest(), ContentFile(coverage))
@@ -85,6 +87,7 @@ class CollectionSerializer(serializers.ModelSerializer):
 
         # Create our Collection instance
         return super(CollectionSerializer, self).create(attrs)
+
 
 class RepositorySerializer(serializers.ModelSerializer):
     class Meta:

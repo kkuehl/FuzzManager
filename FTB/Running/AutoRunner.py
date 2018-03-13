@@ -26,16 +26,17 @@ import signal
 import subprocess
 import sys
 
+import six
+
 from FTB.Signatures.CrashInfo import CrashInfo
 
 
+@six.add_metaclass(ABCMeta)
 class AutoRunner():
     """
     Abstract base class that provides a method to instantiate the right sub class
     for running the given program and obtaining crash information.
     """
-    __metaclass__ = ABCMeta
-
     def __init__(self, binary, args=None, env=None, cwd=None, stdin=None):
         self.binary = binary
         self.cwd = cwd
@@ -52,7 +53,7 @@ class AutoRunner():
             for envkey in env:
                 self.env[envkey] = env[envkey]
 
-        if not 'LD_LIBRARY_PATH' in self.env:
+        if 'LD_LIBRARY_PATH' not in self.env:
             self.env['LD_LIBRARY_PATH'] = os.path.dirname(binary)
 
         self.args = args
@@ -70,10 +71,8 @@ class AutoRunner():
         self.stderr = None
         self.auxCrashData = None
 
-
     def getCrashInfo(self, configuration):
         return CrashInfo.fromRawCrashData(self.stdout, self.stderr, configuration, self.auxCrashData)
-
 
     @staticmethod
     def fromBinaryArgs(binary, args=None, env=None, cwd=None, stdin=None):
@@ -136,10 +135,9 @@ class GDBRunner(AutoRunner):
             else:
                 self.cmdArgs.extend(self.args)
 
-
     def run(self):
         if self.force_core:
-            plainCmdArgs = [ self.binary ]
+            plainCmdArgs = [self.binary]
             plainCmdArgs.extend(self.args)
 
             process = subprocess.Popen(
@@ -208,7 +206,7 @@ class ASanRunner(AutoRunner):
         self.cmdArgs.append(self.binary)
         self.cmdArgs.extend(self.args)
 
-        if not "ASAN_SYMBOLIZER_PATH" in self.env:
+        if "ASAN_SYMBOLIZER_PATH" not in self.env:
             if "ASAN_SYMBOLIZER_PATH" in os.environ:
                 self.env["ASAN_SYMBOLIZER_PATH"] = os.environ["ASAN_SYMBOLIZER_PATH"]
             else:
@@ -223,7 +221,7 @@ class ASanRunner(AutoRunner):
                 "Misconfigured ASAN_SYMBOLIZER_PATH: %s" % self.env["ASAN_SYMBOLIZER_PATH"]
             )
 
-        if not "UBSAN_OPTIONS" in self.env:
+        if "UBSAN_OPTIONS" not in self.env:
             if "UBSAN_OPTIONS" in os.environ:
                 self.env["UBSAN_OPTIONS"] = os.environ["UBSAN_OPTIONS"]
             else:
@@ -232,7 +230,7 @@ class ASanRunner(AutoRunner):
                 # to isolate a UBSan trace.
                 self.env["UBSAN_OPTIONS"] = "print_stacktrace=1"
 
-        if not "ASAN_OPTIONS" in self.env:
+        if "ASAN_OPTIONS" not in self.env:
             if "ASAN_OPTIONS" in os.environ:
                 self.env["ASAN_OPTIONS"] = os.environ["ASAN_OPTIONS"]
             else:
@@ -284,14 +282,14 @@ class ASanRunner(AutoRunner):
             if process.returncode < 0:
                 crashSignals = [
                     # POSIX.1-1990 signals
-                        signal.SIGILL,
-                        signal.SIGABRT,
-                        signal.SIGFPE,
-                        signal.SIGSEGV,
-                        # SUSv2 / POSIX.1-2001 signals
-                        signal.SIGBUS,
-                        signal.SIGSYS,
-                        signal.SIGTRAP,
+                    signal.SIGILL,
+                    signal.SIGABRT,
+                    signal.SIGFPE,
+                    signal.SIGSEGV,
+                    # SUSv2 / POSIX.1-2001 signals
+                    signal.SIGBUS,
+                    signal.SIGSYS,
+                    signal.SIGTRAP,
                 ]
 
                 for crashSignal in crashSignals:

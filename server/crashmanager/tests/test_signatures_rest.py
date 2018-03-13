@@ -12,14 +12,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import json
 import logging
-import os.path
 
 import requests
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase  # APIRequestFactory
 
 from . import TestCase
-from ..models import CrashEntry, TestCase as cmTestCase
 
 
 log = logging.getLogger("fm.crashmanager.tests.signatures.rest")  # pylint: disable=invalid-name
@@ -94,7 +92,7 @@ class RestSignaturesTests(APITestCase, TestCase):
         self.client.force_authenticate(user=user)
         resp = self.client.get('/crashmanager/rest/buckets/')
         self.assertEqual(resp.status_code, requests.codes['ok'])
-        resp = json.loads(resp.content)
+        resp = json.loads(resp.content.decode('utf-8'))
         self.assertEqual(set(resp.keys()), {'count', 'next', 'previous', 'results'})
         self.assertEqual(resp['count'], 2)
         self.assertEqual(resp['next'], None)
@@ -194,7 +192,7 @@ class RestSignatureTests(APITestCase, TestCase):
         self.client.force_authenticate(user=user)
         resp = self.client.get('/crashmanager/rest/buckets/%d/' % bucket.pk)
         self.assertEqual(resp.status_code, requests.codes['ok'])
-        resp = json.loads(resp.content)
+        resp = json.loads(resp.content.decode('utf-8'))
         self.assertEqual(set(resp.keys()), {'best_quality', 'bug', 'frequent', 'id', 'permanent', 'shortDescription',
                                             'signature', 'size'})
         self.assertEqual(resp['id'], bucket.pk)

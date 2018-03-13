@@ -23,12 +23,14 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 # Ensure print() compatibility with Python 3
 from __future__ import print_function
 
-import Queue
 from abc import ABCMeta
 import os
 import signal
 import subprocess
 import time
+
+import six
+from six.moves import queue
 
 from FTB.Running.StreamCollector import StreamCollector
 from FTB.Running.WaitpidMonitor import WaitpidMonitor
@@ -37,25 +39,26 @@ from FTB.Running.WaitpidMonitor import WaitpidMonitor
 class ApplicationStatus:
     OK, ERROR, TIMEDOUT, CRASHED = range(1, 5)
 
+
 class PersistentMode:
     """
     Persistent fuzzing mode - determines how the program synchronizes the
     execution of multiple testcases in one process.
-    
+
     NONE - No persistence at all, program is supposed to exit after every test.
-    
+
     SPFP - Use the Simple Persistent Fuzzing Protocol (SPFP) to synchronize
            execution. This is a simple message exchange on stdin/stdout/stderr.
-             
+
            The program must stick to the following rules:
-             
+
            Listen on stdin for "spfp-selftest" and respond with "SPFP: PASSED".
            Consider everything else on stdin to be test data, terminated by
            "spfp-endofdata". The program must then respond with "SPFP: OK" or
            "SPFP: ERROR" *after* processing the data (i.e. once it is ready to
            receive new data). The program is also not supposed to quit without
            emitting an "SPFP: QUIT" message before.
-             
+
     SIGSTOP - Use a SIGSTOP-based protocol like AFL implements it. After startup,
               the program is supposed to SIGSTOP itself to indicate that it is
               ready to process data. It should also SIGSTOP itself after each
@@ -64,12 +67,12 @@ class PersistentMode:
     """
     NONE, SPFP, SIGSTOP = range(1, 4)
 
+
+@six.add_metaclass(ABCMeta)
 class PersistentApplication():
     '''
     Abstract base class that defines the interface
     '''
-    __metaclass__ = ABCMeta
-
     def __init__(self, binary, args=None, env=None, cwd=None, persistentMode=PersistentMode.NONE,
                  processingTimeout=10, inputFile=None):
         self.binary = binary
@@ -206,22 +209,22 @@ class SimplePersistentApplication(PersistentApplication):
             # at all. Otherwise, all tests should go through the runTest method.
             assert test is None
 
-        popenArgs = [ self.binary ]
+        popenArgs = [self.binary]
         popenArgs.extend(self.args)
 
         self.process = subprocess.Popen(
-                         popenArgs,
-                         stdin=subprocess.PIPE,
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         cwd=self.cwd,
-                         env=self.env,
-                         universal_newlines=True
-                        )
+            popenArgs,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=self.cwd,
+            env=self.env,
+            universal_newlines=True
+        )
 
         # This queue is used to queue up responses that should be directly processed
         # by this class rather than being logged.
-        self.responseQueue = Queue.Queue()
+        self.responseQueue = queue.queue()
 
         self.outCollector = StreamCollector(self.process.stdout, self.responseQueue, logResponses=False, maxBacklog=256)
         self.errCollector = StreamCollector(self.process.stderr, self.responseQueue, logResponses=False, maxBacklog=256)
@@ -242,7 +245,7 @@ class SimplePersistentApplication(PersistentApplication):
 
             try:
                 response = self.responseQueue.get(block=True, timeout=self.processingTimeout)
-            except Queue.Empty:
+            except queue.Empty:
                 raise RuntimeError("SPFP Error: Selftest failed, no response.")
 
             if response != "PASSED":
@@ -259,14 +262,14 @@ class SimplePersistentApplication(PersistentApplication):
 
             # Assume PersistentMode.NONE and expect the process to exit now
             (maxSleepTime, pollInterval) = (self.processingTimeout, 0.2)
-            while self.process.poll() == None and maxSleepTime > 0:
+            while self.process.poll() is None and maxSleepTime > 0:
                 maxSleepTime -= pollInterval
                 time.sleep(pollInterval)
 
             ret = ApplicationStatus.OK
 
             # Process is still alive, consider this a timeout
-            if self.process.poll() == None:
+            if self.process.poll() is None:
                 ret = ApplicationStatus.TIMEDOUT
             elif self._crashed():
                 ret = ApplicationStatus.CRASHED
@@ -278,7 +281,6 @@ class SimplePersistentApplication(PersistentApplication):
             self.stop()
 
             return ret
-
 
     def stop(self):
         self._terminateProcess()
@@ -294,7 +296,7 @@ class SimplePersistentApplication(PersistentApplication):
             self.stderr = self.errCollector.output
 
     def runTest(self, test):
-        if self.process == None or self.process.poll() != None:
+        if self.process is None or self.process.poll() is not None:
             self.start()
 
         # Write test data and also log it
@@ -303,8 +305,8 @@ class SimplePersistentApplication(PersistentApplication):
         if self.persistentMode == PersistentMode.SPFP:
             try:
                 response = self.responseQueue.get(block=True, timeout=self.processingTimeout)
-            except Queue.Empty:
-                if self.process.poll() == None:
+            except queue.Empty:
+                if self.process.poll() is None:
                     # The process is still running, force it to stop and return timeout code
                     self.stop()
                     return ApplicationStatus.TIMEDOUT
@@ -321,11 +323,13 @@ class SimplePersistentApplication(PersistentApplication):
                         # process is being terminated by something else, making the testing unreliable.
                         #
                         # TODO: This could be triggered by the Linux kernel OOM killer
-                        raise RuntimeError("SPFP Error: Application terminated with signal: %s" % self.process.returncode)
+                        raise RuntimeError("SPFP Error: Application terminated with signal: %s" %
+                                           self.process.returncode)
                     else:
                         # The application exited, but didn't send us any message before doing so. We consider this
                         # a protocol violation and raise an exception.
-                        raise RuntimeError("SPFP Error: Application exited without message. Exitcode: %s" % self.process.returncode)
+                        raise RuntimeError("SPFP Error: Application exited without message. Exitcode: %s" %
+                                           self.process.returncode)
 
             # Update stdout/err available for the last run
             self.stdout = self.outCollector.output
@@ -369,18 +373,18 @@ class SimplePersistentApplication(PersistentApplication):
 
     def _terminateProcess(self):
         if self.process:
-            if self.process.poll() == None:
+            if self.process.poll() is None:
                 # Try to terminate the process gracefully first
                 self.process.terminate()
 
                 # Emulate a wait() with timeout. Because wait() having
                 # a timeout would be way too easy, wouldn't it? -.-
                 (maxSleepTime, pollInterval) = (3, 0.2)
-                while self.process.poll() == None and maxSleepTime > 0:
+                while self.process.poll() is None and maxSleepTime > 0:
                     maxSleepTime -= pollInterval
                     time.sleep(pollInterval)
 
                 # Process is still alive, kill it and wait
-                if self.process.poll() == None:
+                if self.process.poll() is None:
                     self.process.kill()
                     self.process.wait()

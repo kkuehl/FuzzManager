@@ -18,6 +18,7 @@ from __future__ import print_function
 import base64
 import requests
 
+
 class BugzillaREST():
     def __init__(self, hostname, username=None, password=None, api_key=None):
         self.hostname = hostname
@@ -31,11 +32,11 @@ class BugzillaREST():
         # method we use (username/password means we need to use token, with
         # API key we can use the api_key field directly).
         self.authField = 'token'
-        if self.api_key != None:
+        if self.api_key is not None:
             self.authField = 'api_key'
 
     def login(self, forceLogin=False):
-        if (self.username == None or self.password == None) and self.api_key == None:
+        if (self.username is None or self.password is None) and self.api_key is None:
             if forceLogin:
                 raise RuntimeError("Need username/password or API key to login.")
             else:
@@ -44,26 +45,26 @@ class BugzillaREST():
         if forceLogin:
             self.authToken = None
 
-        if self.api_key != None:
+        if self.api_key is not None:
             self.authToken = self.api_key
 
         # We either use an API key which doesn't require any prior login
         # or we still have a valid authentication token that we can use.
-        if self.authToken != None:
+        if self.authToken is not None:
             return True
 
         loginUrl = "%s/login?login=%s&password=%s" % (self.baseUrl, self.username, self.password)
         response = requests.get(loginUrl)
         json = response.json()
 
-        if not 'token' in json:
+        if 'token' not in json:
             raise RuntimeError('Login failed: %s', response.text)
 
         self.authToken = json["token"]
         return True
 
     def getBug(self, bugId):
-        bugs = self.getBugs([ bugId ])
+        bugs = self.getBugs([bugId])
 
         if not bugs:
             return None
@@ -71,11 +72,11 @@ class BugzillaREST():
         return bugs[int(bugId)]
 
     def getBugStatus(self, bugIds):
-        return self.getBugs(bugIds, include_fields=[ "id", "is_open", "resolution", "dupe_of", "cf_last_resolved" ])
+        return self.getBugs(bugIds, include_fields=["id", "is_open", "resolution", "dupe_of", "cf_last_resolved"])
 
     def getBugs(self, bugIds, include_fields=None, exclude_fields=None):
         if not isinstance(bugIds, list):
-            bugIds = [ bugIds ]
+            bugIds = [bugIds]
 
         bugUrl = "%s/bug?id=%s" % (self.baseUrl, ",".join(bugIds))
 
@@ -93,7 +94,7 @@ class BugzillaREST():
         response = requests.get(bugUrl + "".join(extraParams))
         json = response.json()
 
-        if not "bugs" in json:
+        if "bugs" not in json:
             return None
 
         ret = {}
@@ -110,14 +111,14 @@ class BugzillaREST():
 
         # Compose our bug attribute using all given arguments with special
         # handling of the self and attrs arguments
-        l = locals()
+        loc = locals()
         bug = {}
-        for k in l:
-            if k == "attrs" and l[k] != None:
-                for ak in l[k]:
-                    bug[ak] = l[k][ak]
-            elif l[k] != None and l[k] != '' and k != "self":
-                bug[k] = l[k]
+        for k in loc:
+            if k == "attrs" and loc[k] is not None:
+                for ak in loc[k]:
+                    bug[ak] = loc[k][ak]
+            elif loc[k] is not None and loc[k] != '' and k != "self":
+                bug[k] = loc[k]
 
         # Ensure we're logged in
         self.login()
@@ -141,7 +142,7 @@ class BugzillaREST():
         createUrl = "%s/bug/%s/comment?%s=%s" % (self.baseUrl, id, self.authField, self.authToken)
         response = requests.post(createUrl, cobj).json()
 
-        if not "id" in response:
+        if "id" not in response:
             return response
 
         commentId = str(response["id"])
@@ -149,10 +150,10 @@ class BugzillaREST():
         commentUrl = "%s/bug/comment/%s?%s=%s" % (self.baseUrl, commentId, self.authField, self.authToken)
         response = requests.get(commentUrl).json()
 
-        if not "comments" in response:
+        if "comments" not in response:
             return response
 
-        if not commentId in response["comments"]:
+        if commentId not in response["comments"]:
             return response
 
         return response["comments"][commentId]
@@ -160,11 +161,11 @@ class BugzillaREST():
     def addAttachment(self, ids, data, file_name, summary, comment=None, is_private=None, is_binary=False):
         # Compose our request using all given arguments with special
         # handling of the self and is_binary arguments
-        l = locals()
+        loc = locals()
         attachment = {}
-        for k in l:
-            if l[k] != None and l[k] != '' and k != "self" and k != "is_binary":
-                attachment[k] = l[k]
+        for k in loc:
+            if loc[k] is not None and loc[k] != '' and k != "self" and k != "is_binary":
+                attachment[k] = loc[k]
 
         # Set proper content-type
         if is_binary:

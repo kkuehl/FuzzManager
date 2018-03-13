@@ -67,7 +67,7 @@ class ProgramConfiguration():
         mainConfig = config.mainConfig
 
         for field in ["product", "platform", "os"]:
-            if not field in mainConfig:
+            if field not in mainConfig:
                 raise RuntimeError('Missing "%s" in binary configuration file %s' % (field, binaryConfig))
 
         # Version field is optional
@@ -75,7 +75,8 @@ class ProgramConfiguration():
         if "product_version" in mainConfig:
             version = mainConfig["product_version"]
 
-        return ProgramConfiguration(mainConfig["product"], mainConfig["platform"], mainConfig["os"], version=version, metadata=config.metadataConfig)
+        return ProgramConfiguration(mainConfig["product"], mainConfig["platform"], mainConfig["os"],
+                                    version=version, metadata=config.metadataConfig)
 
     def addEnvironmentVariables(self, env):
         '''
