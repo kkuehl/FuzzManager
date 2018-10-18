@@ -36,6 +36,17 @@ class RestCrashesTests(APITestCase, TestCase):
         self.assertEqual(self.client.patch(url, {}).status_code, requests.codes['unauthorized'])
         self.assertEqual(self.client.delete(url, {}).status_code, requests.codes['unauthorized'])
 
+    def test_no_perm(self):
+        """must yield forbidden without permission"""
+        url = '/crashmanager/rest/crashes/'
+        user = User.objects.get(username='test-noperm')
+        self.client.force_authenticate(user=user)
+        self.assertEqual(self.client.get(url).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.post(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.put(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.patch(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.delete(url, {}).status_code, requests.codes['forbidden'])
+
     def test_auth(self):
         """test that authenticated requests work"""
         user = User.objects.get(username='test')
@@ -198,7 +209,7 @@ $1 = {si_signo = 11, si_errno = 0, si_code = 2, _sigfault = {si_addr = 0xf705700
 => 0x33674039:	mov    %dx,0x10(%eax,%ecx,1)
    0x3367403e:	pop    %ebp
    0x3367403f:	pop    %esi
-   0x33674040:	ret    
+   0x33674040:	ret
    0x33674041:	jmp    0x33674200
    0x33674046:	sub    $0x4,%esp
    0x33674049:	call   0x336743f0
@@ -284,6 +295,17 @@ $1 = {si_signo = 11, si_errno = 0, si_code = 2, _sigfault = {si_addr = 0xf705700
                 result = getattr(result, attr)
             self.assertEqual(value, result)
 
+        # Repeat the same with a restricted user, check that query returns 403
+        user = User.objects.get(username='test-restricted')
+        self.client.force_authenticate(user=user)
+        resp = self.client.get('/crashmanager/rest/crashes/',
+                               {"query": json.dumps({"op": "AND",
+                                                     "bucket": None,
+                                                     "testcase__quality": 5,
+                                                     "tool__name__in": ["tool1"]})})
+        log.debug(resp)
+        self.assertEqual(resp.status_code, requests.codes['forbidden'])
+
     def test_list_noraw(self):
         """test that crashes can be listed without raw fields"""
         testcase = self.create_testcase("test1.txt", quality=5)
@@ -337,6 +359,17 @@ class RestCrashTests(APITestCase, TestCase):
         self.assertEqual(self.client.patch(url, {}).status_code, requests.codes['unauthorized'])
         self.assertEqual(self.client.delete(url, {}).status_code, requests.codes['unauthorized'])
 
+    def test_no_perm(self):
+        """must yield forbidden without permission"""
+        user = User.objects.get(username='test-noperm')
+        self.client.force_authenticate(user=user)
+        url = '/crashmanager/rest/crashes/1/'
+        self.assertEqual(self.client.get(url).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.post(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.put(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.patch(url, {}).status_code, requests.codes['forbidden'])
+        self.assertEqual(self.client.delete(url, {}).status_code, requests.codes['forbidden'])
+
     def test_auth(self):
         """test that authenticated requests work"""
         user = User.objects.get(username='test')
@@ -344,6 +377,14 @@ class RestCrashTests(APITestCase, TestCase):
         resp = self.client.get('/crashmanager/rest/crashes/')
         log.debug(resp)
         self.assertEqual(resp.status_code, requests.codes['ok'])
+
+    def test_restricted(self):
+        """test that restricted users are rejected"""
+        user = User.objects.get(username='test-restricted')
+        self.client.force_authenticate(user=user)
+        resp = self.client.get('/crashmanager/rest/crashes/')
+        log.debug(resp)
+        self.assertEqual(resp.status_code, requests.codes['forbidden'])
 
     def test_delete(self):
         """delete should not be allowed"""
@@ -407,6 +448,32 @@ class RestCrashTests(APITestCase, TestCase):
                 result = getattr(result, attr)
             self.assertEqual(value, result)
 
+    def test_get_restricted(self):
+        """test that individual CrashEntry can be created but not fetched by restricted user"""
+        user = User.objects.get(username='test-restricted')
+        self.client.force_authenticate(user=user)
+        test = self.create_testcase("test.txt", quality=0)
+        bucket = self.create_bucket(shortDescription="bucket #1")
+        crash = self.create_crash(shortSignature="crash #1",
+                                  bucket=bucket,
+                                  client="client #1",
+                                  os="os #1",
+                                  product="product #1",
+                                  product_version="1",
+                                  platform="platform #1",
+                                  tool="tool #1",
+                                  testcase=test)
+        resp = self.client.get('/crashmanager/rest/crashes/%d/' % crash.pk)
+        log.debug(resp)
+        self.assertEqual(resp.status_code, requests.codes['forbidden'])
+
+        # Retry with unrestricted user and check that the entry has been created
+        user = User.objects.get(username='test')
+        self.client.force_authenticate(user=user)
+        resp = self.client.get('/crashmanager/rest/crashes/%d/' % crash.pk)
+        log.debug(resp)
+        self.assertEqual(resp.status_code, requests.codes['ok'])
+
     def test_update(self):
         """test that only allowed fields of CrashEntry can be updated"""
         user = User.objects.get(username='test')
@@ -434,3 +501,26 @@ class RestCrashTests(APITestCase, TestCase):
         self.assertEqual(resp.status_code, requests.codes['ok'])
         test = cmTestCase.objects.get(pk=test.pk)  # re-read
         self.assertEqual(test.quality, 5)
+
+    def test_update_restricted(self):
+        """test that restricted users cannot perform updates on CrashEntry"""
+        user = User.objects.get(username='test-restricted')
+        self.client.force_authenticate(user=user)
+        test = self.create_testcase("test.txt", quality=0)
+        bucket = self.create_bucket(shortDescription="bucket #1")
+        crash = self.create_crash(shortSignature="crash #1",
+                                  bucket=bucket,
+                                  client="client #1",
+                                  os="os #1",
+                                  product="product #1",
+                                  product_version="1",
+                                  platform="platform #1",
+                                  tool="tool #1",
+                                  testcase=test)
+        fields = {'args', 'bucket', 'client', 'env', 'id', 'metadata', 'os', 'platform', 'product', 'product_version',
+                  'rawCrashData', 'rawStderr', 'rawStdout', 'testcase', 'testcase_isbinary', 'testcase_quality', 'tool',
+                  'shortSignature', 'crashAddress'}
+        for field in fields:
+            resp = self.client.patch('/crashmanager/rest/crashes/%d/' % crash.pk, {field: ""})
+            log.debug(resp)
+            self.assertEqual(resp.status_code, requests.codes['forbidden'])

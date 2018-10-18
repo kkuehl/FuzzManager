@@ -9,6 +9,7 @@ import codecs
 import json
 
 from crashmanager.models import Client, Tool
+from FTB import CoverageHelper
 
 if getattr(settings, 'USE_CELERY', None):
     from .tasks import check_revision_update
@@ -28,6 +29,7 @@ class Repository(models.Model):
 
 class CollectionFile(models.Model):
     file = models.FileField(storage=FileSystemStorage(location=getattr(settings, 'COV_STORAGE', None)),
+                            max_length=255,
                             upload_to="coverage")
     format = models.IntegerField(default=0)
 
@@ -40,7 +42,7 @@ class Collection(models.Model):
     branch = models.CharField(max_length=255, blank=True)
     tools = models.ManyToManyField(Tool)
     client = models.ForeignKey(Client)
-    coverage = models.ForeignKey(CollectionFile)
+    coverage = models.ForeignKey(CollectionFile, blank=True, null=True)
 
     def __init__(self, *args, **kwargs):
         # This variable can hold the deserialized contents of the coverage blob
@@ -86,7 +88,7 @@ class Collection(models.Model):
         provider = self.repository.getInstance()
         coverage["source"] = provider.getSource(path, self.revision)
 
-    def subset(self, path):
+    def subset(self, path, report_configuration=None):
         """
         Calculate a subset of the coverage stored in this collection
         based on the given path.
@@ -106,7 +108,8 @@ class Collection(models.Model):
         if not self.content:
             self.loadCoverage()
 
-        ret = self.content["children"]
+        if report_configuration is not None:
+            report_configuration.apply(self.content)
 
         names = [x for x in path.split("/") if x != ""]
 
@@ -115,6 +118,7 @@ class Collection(models.Model):
             return self.content
 
         try:
+            ret = self.content["children"]
             for name in names[:-1]:
                 ret = ret[name]["children"]
             ret = ret[names[-1]]
@@ -182,3 +186,20 @@ if getattr(settings, 'USE_CELERY', None):
     @receiver(post_save, sender=Collection)
     def Collection_save(sender, instance, **kwargs):
         check_revision_update.delay(instance.pk)
+
+
+class ReportConfiguration(models.Model):
+    description = models.CharField(max_length=1023, blank=True)
+    repository = models.ForeignKey(Repository)
+    directives = models.TextField()
+    public = models.BooleanField(blank=False, default=False)
+    logical_parent = models.ForeignKey("self", blank=True, null=True)
+
+    def apply(self, collection):
+        CoverageHelper.apply_include_exclude_directives(collection, self.directives.splitlines())
+        CoverageHelper.calculate_summary_fields(collection)
+
+
+class ReportSummary(models.Model):
+    collection = models.OneToOneField(Collection)
+    cached_result = models.TextField(null=True, blank=True)

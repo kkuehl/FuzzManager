@@ -35,7 +35,13 @@ class EC2SpotManagerTests(TestCase):
         self.client.login(username='test', password='test')
         index = reverse('ec2spotmanager:pools')
         self.assertEqual(self.client.get(index).status_code, requests.codes['ok'])
-        response = self.client.get(reverse('ec2spotmanager:logout'))
+        response = self.client.get(reverse('logout'))
         log.debug(response)
         response = self.client.get(index)
         self.assertRedirects(response, '/login/?next=' + index)
+
+    def test_noperm(self):
+        """Request without permission results in 404"""
+        self.client.login(username='test-noperm', password='test')
+        resp = self.client.get(reverse('ec2spotmanager:index'))
+        assert resp.status_code == 404

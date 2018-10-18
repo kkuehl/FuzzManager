@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # encoding: utf-8
 '''
 Prices -- Various methods for accessing price history on EC2
@@ -13,68 +12,33 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 @contact:    choller@mozilla.com
 '''
-import datetime
-
-import boto.ec2
-from django.utils import timezone
 
 
-# Blacklist zones that currently don't allow subnets to be set on them
-# until we found a better way to deal with this situation.
-zone_blacklist = ["us-east-1a", "us-east-1f"]
-
-
-# This function must be defined at the module level so it can be pickled
-# by the multiprocessing module when calling this asynchronously.
-def get_spot_price_per_region(region_name, aws_key_id, aws_secret_key, instance_type):
-    '''Gets spot prices of the specified region and instance type'''
-    now = timezone.now()
-    start = now - datetime.timedelta(hours=6)
-    region = boto.ec2.connect_to_region(region_name,
-                                        aws_access_key_id=aws_key_id,
-                                        aws_secret_access_key=aws_secret_key
-                                        )
-
-    if not region:
-        raise RuntimeError("Invalid region: %s" % region_name)
-
-    r = region.get_spot_price_history(start_time=start.isoformat(),
-                                      instance_type=instance_type,
-                                      product_description="Linux/UNIX"
-                                      )  # TODO: Make configurable
-    return r
-
-
-def get_spot_prices(regions, aws_key_id, aws_secret_key, instance_type, use_multiprocess=False):
+def get_prices(regions, cloud_provider, instance_types=None, use_multiprocess=False):
     if use_multiprocess:
         from multiprocessing import Pool, cpu_count
         pool = Pool(cpu_count())
 
-    results = []
-    for region in regions:
+    try:
+        results = []
+        for region in regions:
+            args = [region, instance_types]
+            if use_multiprocess:
+                results.append(pool.apply_async(cloud_provider.get_prices_per_region, args))
+            else:
+                results.append(cloud_provider.get_prices_per_region(*args))
+
+        prices = {}
+        for result in results:
+            if use_multiprocess:
+                result = result.get()
+            for instance_type in result:
+                prices.setdefault(instance_type, {})
+                prices[instance_type].update(result[instance_type])
+    finally:
         if use_multiprocess:
-            f = pool.apply_async(get_spot_price_per_region, [region, aws_key_id, aws_secret_key, instance_type])
-        else:
-            f = get_spot_price_per_region(region, aws_key_id, aws_secret_key, instance_type)
-        results.append(f)
-
-    prices = {}
-    for result in results:
-        if use_multiprocess:
-            result = result.get()
-        for entry in result:
-            if entry.region.name not in prices:
-                prices[entry.region.name] = {}
-
-            zone = entry.availability_zone
-
-            if zone in zone_blacklist:
-                continue
-
-            if zone not in prices[entry.region.name]:
-                prices[entry.region.name][zone] = []
-
-            prices[entry.region.name][zone].append(entry.price)
+            pool.close()
+            pool.join()
 
     return prices
 

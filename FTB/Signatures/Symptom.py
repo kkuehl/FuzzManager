@@ -342,23 +342,27 @@ class StackFramesSymptom(Symptom):
         hasVariableStackLengthQuantifier = '???' in [str(x) for x in newSignatureGuess]
 
         for idx in range(startIdx, len(newSignatureGuess)):
-            newSignatureGuess.insert(idx, singleWildcardMatch)
+            if idx == startIdx or (str(newSignatureGuess[idx - 1]) != '?' and str(newSignatureGuess[idx - 1]) != '???'):
+                # Inserting '?' after another '?' or '???' does not make a difference
+                # because it is equivalent to inserting it before that last wildcard itself.
 
-            # Check if we have a match with our modification
-            if StackFramesSymptom._match(stack, newSignatureGuess):
-                return (depth, newSignatureGuess)
+                newSignatureGuess.insert(idx, singleWildcardMatch)
 
-            # If we don't have a match but we're not at our current depth limit,
-            # add one more level of depth for our search.
-            if depth < maxDepth:
-                (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx,
-                                                                        depth + 1, maxDepth)
+                # Check if we have a match with our modification
+                if StackFramesSymptom._match(stack, newSignatureGuess):
+                    return (depth, newSignatureGuess)
 
-                if newBestDepth is not None and (bestDepth is None or newBestDepth < bestDepth):
-                    bestDepth = newBestDepth
-                    bestGuess = newBestGuess
+                # If we don't have a match but we're not at our current depth limit,
+                # add one more level of depth for our search.
+                if depth < maxDepth:
+                    (newBestDepth, newBestGuess) = StackFramesSymptom._diff(stack, newSignatureGuess, idx,
+                                                                            depth + 1, maxDepth)
 
-            newSignatureGuess.pop(idx)
+                    if newBestDepth is not None and (bestDepth is None or newBestDepth < bestDepth):
+                        bestDepth = newBestDepth
+                        bestGuess = newBestGuess
+
+                newSignatureGuess.pop(idx)
 
             # Now repeat the same with replacing instead of adding
             # unless the match at idx is a wildcard itself

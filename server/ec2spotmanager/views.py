@@ -1,7 +1,8 @@
+import json
+from operator import attrgetter
 from chartjs.colors import next_color
 from chartjs.views.base import JSONView
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import logout
+from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
 from django.core.files.base import ContentFile
 from django.db.models.aggregates import Count
@@ -9,40 +10,34 @@ from django.http.response import Http404  # noqa
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils.timezone import now, timedelta
 import fasteners
-from operator import attrgetter
+import redis
 from rest_framework import status
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from ec2spotmanager.common.prices import get_spot_prices
-from ec2spotmanager.models import InstancePool, PoolConfiguration, Instance, \
-    INSTANCE_STATE_CODE, INSTANCE_STATE, PoolStatusEntry
-from ec2spotmanager.models import PoolUptimeDetailedEntry, PoolUptimeAccumulatedEntry
-from ec2spotmanager.serializers import MachineStatusSerializer
+from server.auth import CheckAppPermission
+from server.views import deny_restricted_users
+from .models import InstancePool, PoolConfiguration, Instance, PoolStatusEntry
+from .models import PoolUptimeDetailedEntry, PoolUptimeAccumulatedEntry
+from .serializers import MachineStatusSerializer
+from .CloudProvider.CloudProvider import INSTANCE_STATE, INSTANCE_STATE_CODE, PROVIDERS, CloudProvider
 
 
 def renderError(request, err):
     return render(request, 'error.html', {'error_message': err})
 
 
-def logout_view(request):
-    logout(request)
-    return redirect('ec2spotmanager:index')
-
-
-@login_required(login_url='/login/')
+@deny_restricted_users
 def index(request):
     return redirect('ec2spotmanager:pools')
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def pools(request):
     filters = {}
     isSearch = True
 
-    entries = InstancePool.objects.annotate(size=Count('instance')).order_by('-id')
+    entries = InstancePool.objects.annotate(size=Count('instance')).order_by('config__name')
 
     # These are all keys that are allowed for exact filtering
     exactFilterKeys = [
@@ -64,10 +59,11 @@ def pools(request):
         entry.msgs = PoolStatusEntry.objects.filter(pool=entry).order_by('-created')
 
     for pool in entries:
-        pool.instance_requested_count = Instance.objects.filter(
-            pool=pool, status_code=INSTANCE_STATE['requested']).count()
-        pool.instance_running_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['running']).count()
-        if pool.size == pool.instance_running_count:
+        pool.instance_requested_count = sum(instance.size for instance in Instance.objects.filter(
+            pool=pool, status_code=INSTANCE_STATE['requested']))
+        pool.instance_running_count = sum(instance.size for instance in Instance.objects.filter(
+            pool=pool, status_code=INSTANCE_STATE['running']))
+        if pool.size <= pool.instance_running_count:
             pool.size_label = 'success'
         elif pool.size == 0:
             pool.size_label = 'danger'
@@ -82,7 +78,7 @@ def pools(request):
     return render(request, 'pools/index.html', data)
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def viewPool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
     instances = Instance.objects.filter(pool=poolid)
@@ -115,25 +111,30 @@ def viewPool(request, poolid):
     return render(request, 'pools/view.html', data)
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def viewPoolPrices(request, poolid):
+    cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
+    cloud_provider = CloudProvider.get_instance(PROVIDERS[0])
+
     pool = get_object_or_404(InstancePool, pk=poolid)
     config = pool.config.flatten()
-    prices = {instance_type: get_spot_prices(config.ec2_allowed_regions,
-                                             config.aws_access_key_id,
-                                             config.aws_secret_access_key,
-                                             instance_type)
-              for instance_type in config.ec2_instance_types}
-
+    cores_per_instance = cloud_provider.get_cores_per_instance()
+    allowed_regions = set(cloud_provider.get_allowed_regions(config))
     zones = set()
     latest_price_by_zone = {}
 
-    for instance_type in prices:
-        for region in prices[instance_type]:
-            for zone in prices[instance_type][region]:
+    for instance_type in cloud_provider.get_instance_types(config):
+        prices = cache.get('%s:price:%s' % (cloud_provider.get_name(), instance_type))
+        if prices is None:
+            continue
+        prices = json.loads(prices)
+        for region in prices:
+            if region not in allowed_regions:
+                continue
+            for zone in prices[region]:
                 zones.add(zone)
                 latest_price_by_zone[zone] = min(latest_price_by_zone.get(zone, 9999),
-                                                 prices[instance_type][region][zone][0])
+                                                 prices[region][zone][0] / cores_per_instance[instance_type])
 
     prices = []
     for zone in sorted(zones):
@@ -142,10 +143,9 @@ def viewPoolPrices(request, poolid):
     return render(request, 'pools/prices.html', {'prices': prices})
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def disablePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
-    instances = Instance.objects.filter(pool=poolid)
 
     if not pool.isEnabled:
         return render(request, 'pools/error.html', {'error_message': 'That pool is already disabled.'})
@@ -155,12 +155,13 @@ def disablePool(request, poolid):
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/disable.html', {'pool': pool, 'instanceCount': len(instances)})
+        pool.instance_running_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['running']).count()
+        return render(request, 'pools/disable.html', {'pool': pool})
     else:
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def enablePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
 
@@ -176,8 +177,6 @@ def enablePool(request, poolid):
     if missing:
         return render(request, 'pools/error.html', {'error_message': 'Pool is missing configuration parameters.'})
 
-    size = pool.config.flatten().size
-
     if pool.isEnabled:
         return render(request, 'pools/error.html', {'error_message': 'That pool is already enabled.'})
 
@@ -187,31 +186,30 @@ def enablePool(request, poolid):
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/enable.html', {'pool': pool, 'instanceCount': size})
+        return render(request, 'pools/enable.html', {'pool': pool, 'coreCount': pool.config.flatten().size})
     else:
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def forceCyclePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
 
     if not pool.isEnabled:
         return render(request, 'pools/error.html', {'error_message': 'Pool is disabled.'})
 
-    size = pool.config.flatten().size
-
     if request.method == 'POST':
         pool.last_cycled = None
         pool.save()
         return redirect('ec2spotmanager:poolview', poolid=pool.pk)
     elif request.method == 'GET':
-        return render(request, 'pools/cycle.html', {'pool': pool, 'instanceCount': size})
+        pool.instance_running_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['running']).count()
+        return render(request, 'pools/cycle.html', {'pool': pool})
     else:
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def forceCyclePoolsByConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
 
@@ -224,26 +222,27 @@ def forceCyclePoolsByConfig(request, configid):
 
         return config_pks
 
-    # Recursively enumerate all configurations directly or indirectly depending on this one
-    config_pks = recurse_get_dependent_configurations(config)
-
-    # Get all pools depending on our configurations
-    pools = InstancePool.objects.filter(config__pk__in=config_pks, isEnabled=True)
-
-    for pool in pools:
-        pool.size = pool.config.flatten().size
-
     if request.method == 'POST':
         pool_pks = request.POST.getlist('poolids')
         InstancePool.objects.filter(pk__in=pool_pks, isEnabled=True).update(last_cycled=None)
         return redirect('ec2spotmanager:pools')
     elif request.method == 'GET':
+        # Recursively enumerate all configurations directly or indirectly depending on this one
+        config_pks = recurse_get_dependent_configurations(config)
+
+        # Get all pools depending on our configurations
+        pools = InstancePool.objects.filter(config__pk__in=config_pks, isEnabled=True)
+
+        for pool in pools:
+            pool.instance_running_count = Instance.objects.filter(pool=pool, status_code=INSTANCE_STATE['running']) \
+                .count()
+
         return render(request, 'config/cycle.html', {'config': config, 'pools': pools})
     else:
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def createPool(request):
     if request.method == 'POST':
         pool = InstancePool()
@@ -258,7 +257,7 @@ def createPool(request):
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def viewConfigs(request):
     configs = PoolConfiguration.objects.all()
     roots = configs.filter(parent=None)
@@ -278,13 +277,13 @@ def viewConfigs(request):
     return render(request, 'config/index.html', data)
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def viewConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
 
-    data = {'config': config}
+    config.deserializeFields()
 
-    return render(request, 'config/view.html', data)
+    return render(request, 'config/view.html', {'config': config})
 
 
 def __handleConfigPOST(request, config):
@@ -306,16 +305,6 @@ def __handleConfigPOST(request, config):
     else:
         config.cycle_interval = None
 
-    if request.POST['aws_access_key_id']:
-        config.aws_access_key_id = request.POST['aws_access_key_id']
-    else:
-        config.aws_access_key_id = None
-
-    if request.POST['aws_secret_access_key']:
-        config.aws_secret_access_key = request.POST['aws_secret_access_key']
-    else:
-        config.aws_secret_access_key = None
-
     if request.POST['ec2_key_name']:
         config.ec2_key_name = request.POST['ec2_key_name']
     else:
@@ -334,55 +323,62 @@ def __handleConfigPOST(request, config):
     if request.POST['ec2_allowed_regions']:
         config.ec2_allowed_regions_list = [x.strip() for x in request.POST['ec2_allowed_regions'].split(',')]
     else:
-        config.ec2_allowed_regions_list = None
+        config.allowed_regions_list = None
+    config.allowed_regions_override = request.POST.get('allowed_regions_override', 'off') == 'on'
 
     if request.POST['ec2_security_groups']:
         config.ec2_security_groups_list = [x.strip() for x in request.POST['ec2_security_groups'].split(',')]
     else:
         config.ec2_security_groups_list = None
+    config.ec2_security_groups_override = request.POST.get('ec2_security_groups_override', 'off') == 'on'
 
     if request.POST['ec2_instance_types']:
         config.ec2_instance_types_list = [x.strip() for x in request.POST['ec2_instance_types'].split(',')]
     else:
         config.ec2_instance_types_list = None
+    config.ec2_instance_types_override = request.POST.get('ec2_instance_types_override', 'off') == 'on'
 
-    if request.POST['ec2_userdata_macros']:
-        config.ec2_userdata_macros_dict = dict(
-            y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_userdata_macros'].split(',')])
+    if request.POST['userdata_macros']:
+        config.userdata_macros_dict = dict(
+            y.split('=', 1) for y in [x.strip() for x in request.POST['userdata_macros'].split(',')])
     else:
-        config.ec2_userdata_macros_dict = None
+        config.userdata_macros_dict = None
+    config.userdata_macros_override = request.POST.get('userdata_macros_override', 'off') == 'on'
 
     if request.POST['ec2_tags']:
         config.ec2_tags_dict = dict(y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_tags'].split(',')])
     else:
+
         config.ec2_tags_dict = None
+    config.ec2_tags_override = request.POST.get('ec2_tags_override', 'off') == 'on'
 
     if request.POST['ec2_raw_config']:
         config.ec2_raw_config_dict = dict(
             y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_raw_config'].split(',')])
     else:
         config.ec2_raw_config_dict = None
+    config.ec2_raw_config_override = request.POST.get('ec2_raw_config_override', 'off') == 'on'
 
     # Ensure we have a primary key before attempting to store files
     config.save()
 
-    if request.POST['ec2_userdata']:
-        if not config.ec2_userdata_file.name:
-            config.ec2_userdata_file.save("default.sh", ContentFile(""))
-        config.ec2_userdata = request.POST['ec2_userdata']
-        if request.POST.get('ec2_userdata_ff', 'unix') == 'unix':
-            config.ec2_userdata = config.ec2_userdata.replace('\r\n', '\n')
+    if request.POST['userdata']:
+        if not config.userdata_file.name:
+            config.userdata_file.save("default.sh", ContentFile(""))
+        config.userdata = request.POST['userdata']
+        if request.POST.get('userdata_ff', 'unix') == 'unix':
+            config.userdata = config.userdata.replace('\r\n', '\n')
         config.storeTestAndSave()
     else:
-        if config.ec2_userdata_file:
-            # Forcing test saving with ec2_userdata unset will clean the file
-            config.ec2_userdata = None
+        if config.userdata_file:
+            # Forcing test saving with userdata unset will clean the file
+            config.userdata = None
             config.storeTestAndSave()
 
     return redirect('ec2spotmanager:configview', configid=config.pk)
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def createConfig(request):
     if request.method == 'POST':
         config = PoolConfiguration()
@@ -411,7 +407,7 @@ def createConfig(request):
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def editConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
     config.deserializeFields()
@@ -423,13 +419,13 @@ def editConfig(request, configid):
         data = {'config': config,
                 'configurations': configurations,
                 'edit': True,
-                'userdata_ff': 'dos' if (b'\r\n' in (config.ec2_userdata or b'')) else 'unix'}
+                'userdata_ff': 'dos' if (b'\r\n' in (config.userdata or b'')) else 'unix'}
         return render(request, 'config/edit.html', data)
     else:
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def deletePool(request, poolid):
     pool = get_object_or_404(InstancePool, pk=poolid)
 
@@ -444,7 +440,7 @@ def deletePool(request, poolid):
                               'Please wait for their termination first.')})
 
     if request.method == 'POST':
-        lock = fasteners.InterProcessLock('/tmp/ec2spotmanager.pool%d.lck' % poolid)
+        lock = fasteners.InterProcessLock('/tmp/ec2spotmanager.pool%s.lck' % poolid)
 
         if not lock.acquire(blocking=False):
             return render(request, 'pools/error.html', {
@@ -463,7 +459,7 @@ def deletePool(request, poolid):
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def deletePoolMsg(request, msgid):
     entry = get_object_or_404(PoolStatusEntry, pk=msgid)
     if request.method == 'POST':
@@ -475,7 +471,7 @@ def deletePoolMsg(request, msgid):
         raise SuspiciousOperation
 
 
-@login_required(login_url='/login/')
+@deny_restricted_users
 def deleteConfig(request, configid):
     config = get_object_or_404(PoolConfiguration, pk=configid)
 
@@ -506,6 +502,8 @@ def deleteConfig(request, configid):
 
 
 class UptimeChartViewDetailed(JSONView):
+    authentication_classes = (SessionAuthentication,)  # noqa
+
     def get_context_data(self, **kwargs):
         context = super(UptimeChartViewDetailed, self).get_context_data(**kwargs)
         pool = InstancePool.objects.get(pk=int(kwargs['poolid']))
@@ -578,6 +576,8 @@ class UptimeChartViewDetailed(JSONView):
 
 
 class UptimeChartViewAccumulated(JSONView):
+    authentication_classes = (SessionAuthentication,)  # noqa
+
     def get_context_data(self, **kwargs):
         context = super(UptimeChartViewAccumulated, self).get_context_data(**kwargs)
         pool = InstancePool.objects.get(pk=int(kwargs['poolid']))
@@ -673,7 +673,7 @@ class MachineStatusViewSet(APIView):
 
 class PoolCycleView(APIView):
     authentication_classes = (TokenAuthentication,)  # noqa
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CheckAppPermission,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)
@@ -689,7 +689,7 @@ class PoolCycleView(APIView):
 
 class PoolEnableView(APIView):
     authentication_classes = (TokenAuthentication,)  # noqa
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CheckAppPermission,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)
@@ -706,7 +706,7 @@ class PoolEnableView(APIView):
 
 class PoolDisableView(APIView):
     authentication_classes = (TokenAuthentication,)  # noqa
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CheckAppPermission,)
 
     def post(self, request, poolid, format=None):
         pool = get_object_or_404(InstancePool, pk=poolid)

@@ -1,9 +1,44 @@
+from django.shortcuts import redirect
+from django.contrib.auth.views import login as django_login
+from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator, PageNotAnInteger, EmptyPage
 from django.db.models import Q
 import collections
+import functools
 import json
 from rest_framework import filters
 import six
+
+from crashmanager.models import User
+
+
+def index(request):
+    user = User.get_or_create_restricted(request.user)[0]
+    # return crashmanager, covmanager, or ec2spotmanager, as allowed, in that order.
+    # if no permission to view any apps, then use crashmanager and let that fail
+    if not user.user.has_perm('crashmanager.view_crashmanager'):
+        if user.user.has_perm('crashmanager.view_covmanager'):
+            return redirect('covmanager:index')
+        elif user.user.has_perm('crashmanager.view_ec2spotmanager'):
+            return redirect('ec2spotmanager:index')
+    return redirect('crashmanager:index')
+
+
+def login(request):
+    if settings.USE_OIDC:
+        return redirect('oidc_authentication_init')
+    return django_login(request)
+
+
+def deny_restricted_users(wrapped):
+    @functools.wraps(wrapped)
+    def decorator(request, *args, **kwargs):
+        user = User.get_or_create_restricted(request.user)[0]
+        if user.restricted:
+            raise PermissionDenied({"message": "You don't have permission to access this view."})
+        return wrapped(request, *args, **kwargs)
+    return decorator
 
 
 def renderError(request, err):

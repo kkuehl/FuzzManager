@@ -30,14 +30,20 @@ class CrashManagerTests(TestCase):
     def test_no_login(self):
         """Request of root url redirects to crashes view"""
         self.client.login(username='test', password='test')
-        self.assertRedirects(self.client.get('/'), reverse('crashmanager:crashes'))
+        self.assertRedirects(self.client.get('/'), reverse('crashmanager:index'))
 
     def test_logout(self):
         """Logout url actually logs us out"""
         self.client.login(username='test', password='test')
         self.assertEqual(self.client.get(reverse('crashmanager:crashes')).status_code, requests.codes['ok'])
-        response = self.client.get(reverse('crashmanager:logout'))
+        response = self.client.get(reverse('logout'))
         log.debug(response)
         response = self.client.get('/')
         log.debug(response)
         self.assertRedirects(response, '/login/?next=/')
+
+    def test_noperm(self):
+        """Request without permission results in 404"""
+        self.client.login(username='test-noperm', password='test')
+        resp = self.client.get(reverse('crashmanager:index'))
+        assert resp.status_code == 404

@@ -124,44 +124,41 @@ class CreateConfigViewTests(TestCase):
         self.assertContains(response, 'name="name"')
         self.assertContains(response, 'name="size"')
         self.assertContains(response, 'name="cycle_interval"')
-        self.assertContains(response, 'name="aws_access_key_id"')
 
     def test_create(self):
         """Config created via form should be added to db"""
         self.client.login(username='test', password='test')
-        response = self.client.post(reverse(self.name), {'parent': '-1',
-                                                         'name': 'config #1',
-                                                         'size': '1',
-                                                         'cycle_interval': '1',  # activate tsmith mode
-                                                         'aws_access_key_id': 'deadbeef',
-                                                         'aws_secret_access_key': 'n0b0deee',
-                                                         'ec2_key_name': 'key #1',
-                                                         'ec2_security_groups': 'group #1',
-                                                         'ec2_instance_types': 'machine #1',
-                                                         'ec2_image_name': 'ami #1',
-                                                         'ec2_userdata': 'lorem ipsum',
-                                                         'ec2_userdata_macros': 'yup=123,nope=456',
-                                                         'ec2_allowed_regions': 'nowhere',
-                                                         'ec2_max_price': '0.01',
-                                                         'ec2_tags': 'good=true, bad=false',
-                                                         'ec2_raw_config': 'hello=world'})
+        response = self.client.post(reverse(self.name),
+                                    {'parent': '-1',
+                                        'name': 'config #1',
+                                        'size': '1',
+                                        'cycle_interval': '1',  # activate tsmith mode
+                                        'ec2_key_name': 'key #1',
+                                        'ec2_security_groups': 'group #1',
+                                        'ec2_instance_types': 'machine #1',
+                                        'ec2_image_name': 'ami #1',
+                                        'userdata': 'lorem ipsum',
+                                        'userdata_macros': 'yup=123,nope=456',
+                                        'ec2_allowed_regions': 'nowhere',
+                                        'ec2_max_price': '0.01',
+                                        'ec2_tags': 'good=true, bad=false',
+                                        'ec2_raw_config': 'hello=world'})
         log.debug(response)
         cfg = PoolConfiguration.objects.get(name='config #1')
         self.assertIsNone(cfg.parent)
         self.assertEqual(cfg.size, 1)
         self.assertEqual(cfg.cycle_interval, 1)
-        self.assertEqual(cfg.aws_access_key_id, 'deadbeef')
-        self.assertEqual(cfg.aws_secret_access_key, 'n0b0deee')
+
         self.assertEqual(cfg.ec2_key_name, 'key #1')
-        self.assertEqual(cfg.ec2_security_groups, json.dumps(['group #1']))
-        self.assertEqual(cfg.ec2_instance_types, json.dumps(['machine #1']))
+        self.assertEqual(json.loads(cfg.ec2_security_groups), ['group #1'])
+        self.assertEqual(json.loads(cfg.ec2_instance_types), ['machine #1'])
         self.assertEqual(cfg.ec2_image_name, 'ami #1')
-        self.assertEqual(cfg.ec2_userdata_file.read(), b'lorem ipsum')
-        self.assertEqual(cfg.ec2_userdata_macros, json.dumps({'yup': '123', 'nope': '456'}))
-        self.assertEqual(cfg.ec2_allowed_regions, json.dumps(['nowhere']))
+        self.assertEqual(cfg.userdata_file.read(), b'lorem ipsum')
+        self.assertEqual(json.loads(cfg.userdata_macros), {'yup': '123', 'nope': '456'})
+        self.assertEqual(json.loads(cfg.ec2_allowed_regions), ['nowhere'])
         self.assertEqual(cfg.ec2_max_price, decimal.Decimal('0.01'))
-        self.assertEqual(cfg.ec2_tags, json.dumps({'good': 'true', 'bad': 'false'}))
-        self.assertEqual(cfg.ec2_raw_config, json.dumps({'hello': 'world'}))
+        self.assertEqual(json.loads(cfg.ec2_tags), {'good': 'true', 'bad': 'false'})
+        self.assertEqual(json.loads(cfg.ec2_raw_config), {'hello': 'world'})
         self.assertRedirects(response, reverse('ec2spotmanager:configview', kwargs={'configid': cfg.pk}))
 
     def test_clone(self):
@@ -170,13 +167,11 @@ class CreateConfigViewTests(TestCase):
         cfg = self.create_config(name='config #1',
                                  size=1234567,
                                  cycle_interval=7654321,
-                                 aws_access_key_id='deadbeef',
-                                 aws_secret_access_key='n0b0deee',
                                  ec2_key_name='key #1',
                                  ec2_security_groups=['group #1'],
                                  ec2_instance_types=['machine #1'],
                                  ec2_image_name='ami #1',
-                                 ec2_userdata_macros={'yup': '123', 'nope': '456'},
+                                 userdata_macros={'yup': '123', 'nope': '456'},
                                  ec2_allowed_regions=['nowhere'],
                                  ec2_max_price='0.01',
                                  ec2_tags={'good': 'true', 'bad': 'false'},
@@ -188,8 +183,6 @@ class CreateConfigViewTests(TestCase):
         self.assertContains(response, 'config #1 (Cloned)')
         self.assertContains(response, '1234567')
         self.assertContains(response, '7654321')
-        self.assertContains(response, 'deadbeef')
-        self.assertContains(response, 'n0b0deee')
         self.assertContains(response, 'key #1')
         self.assertContains(response, 'group #1')
         self.assertContains(response, 'machine #1')
@@ -216,13 +209,11 @@ class ViewConfigViewTests(TestCase):
         cfg = self.create_config(name='config #1',
                                  size=1234567,
                                  cycle_interval=7654321,
-                                 aws_access_key_id='deadbeef',
-                                 aws_secret_access_key='n0b0deee',
                                  ec2_key_name='key #1',
                                  ec2_security_groups=['group #1'],
                                  ec2_instance_types=['machine #1'],
                                  ec2_image_name='ami #1',
-                                 ec2_userdata_macros={'yup': '123', 'nope': '456'},
+                                 userdata_macros={'yup': '123', 'nope': '456'},
                                  ec2_allowed_regions=['nowhere'],
                                  ec2_max_price='0.01',
                                  ec2_tags={'good': 'true', 'bad': 'false'},
@@ -234,19 +225,17 @@ class ViewConfigViewTests(TestCase):
         self.assertContains(response, 'config #1')
         self.assertContains(response, '1234567')
         self.assertContains(response, '7654321')
-        self.assertContains(response, 'deadbeef')
-        self.assertContains(response, 'n0b0deee')
         self.assertContains(response, 'key #1')
         self.assertContains(response, 'group #1')
         self.assertContains(response, 'machine #1')
         self.assertContains(response, 'ami #1')
-        self.assertContains(response, '&quot;yup&quot;: &quot;123&quot;')
-        self.assertContains(response, '&quot;nope&quot;: &quot;456&quot;')
+        self.assertContains(response, 'yup=123')
+        self.assertContains(response, 'nope=456')
         self.assertContains(response, 'nowhere')
         self.assertContains(response, '0.01')
-        self.assertContains(response, '&quot;bad&quot;: &quot;false&quot;')
-        self.assertContains(response, '&quot;good&quot;: &quot;true&quot;')
-        self.assertContains(response, '&quot;hello&quot;: &quot;world&quot;')
+        self.assertContains(response, 'bad=false')
+        self.assertContains(response, 'good=true')
+        self.assertContains(response, 'hello=world')
 
 
 class EditConfigViewTests(TestCase):
@@ -264,13 +253,11 @@ class EditConfigViewTests(TestCase):
         cfg = self.create_config(name='config #1',
                                  size=1234567,
                                  cycle_interval=7654321,
-                                 aws_access_key_id='deadbeef',
-                                 aws_secret_access_key='n0b0deee',
                                  ec2_key_name='key #1',
                                  ec2_security_groups=['group #1'],
                                  ec2_instance_types=['machine #1'],
                                  ec2_image_name='ami #1',
-                                 ec2_userdata_macros={'yup': '123', 'nope': '456'},
+                                 userdata_macros={'yup': '123', 'nope': '456'},
                                  ec2_allowed_regions=['nowhere'],
                                  ec2_max_price='0.01',
                                  ec2_tags={'good': 'true', 'bad': 'false'},
@@ -283,8 +270,6 @@ class EditConfigViewTests(TestCase):
         self.assertContains(response, 'config #1')
         self.assertContains(response, '1234567')
         self.assertContains(response, '7654321')
-        self.assertContains(response, 'deadbeef')
-        self.assertContains(response, 'n0b0deee')
         self.assertContains(response, 'key #1')
         self.assertContains(response, 'group #1')
         self.assertContains(response, 'machine #1')

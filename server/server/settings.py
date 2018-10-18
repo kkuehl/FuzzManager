@@ -11,12 +11,8 @@ https://docs.djangoproject.com/en/1.6/ref/settings/
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 from __future__ import print_function
 import os
-import sys
 from django.conf import global_settings  # noqa
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-
-FTB_PATH = os.path.abspath(os.path.join(BASE_DIR, ".."))
-sys.path += [FTB_PATH]
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.6/howto/deployment/checklist/
@@ -49,6 +45,7 @@ INSTALLED_APPS = (
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'livesync',
     'django.contrib.staticfiles',
     'ec2spotmanager',
     'crashmanager',
@@ -56,26 +53,23 @@ INSTALLED_APPS = (
     'rest_framework',
     'rest_framework.authtoken',
     'chartjs',
+    #'mozilla_django_oidc',
 )
-
-
-# This tiny middleware module allows us to see exceptions on stderr
-# when running a Django instance with runserver.py
-class ExceptionLoggingMiddleware(object):
-    def process_exception(self, request, exception):
-        import traceback
-        print(traceback.format_exc())
 
 
 MIDDLEWARE_CLASSES = (
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     #'django.contrib.auth.middleware.RemoteUserMiddleware',
+    #'mozilla_django_oidc.middleware.SessionRefresh',
+    'server.middleware.RequireLoginMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'server.settings.ExceptionLoggingMiddleware',
+    'server.middleware.ExceptionLoggingMiddleware',
+    'server.middleware.CheckAppPermissionsMiddleware',
+    'livesync.core.middleware.DjangoLiveSyncMiddleware',
 )
 
 
@@ -110,18 +104,49 @@ TEMPLATES = [
     },
 ]
 
+# This is code for Mozilla's 2FA using OID. If you have your own OID provider,
+# you can probably use similar code to get 2FA for your FuzzManager instance.
+
+USE_OIDC = False
+
+# Modify the way we generate our usernames, based on the email address
+#OIDC_USERNAME_ALGO = 'server.auth.generate_username'
+#
+#
+#OID_ALLOWED_USERS = {
+#    "test@example.com",
+#}
+
 # For basic auth, uncomment the following lines and the line
 # in MIDDLEWARE_CLASSES containing RemoteUserMiddleware.
 # You still have to configure basic auth through your webserver.
 #
 #AUTHENTICATION_BACKENDS = (
 #    'django.contrib.auth.backends.RemoteUserBackend',
+#    'server.settings.FMOIDCAB',
 #)
+
 
 ROOT_URLCONF = 'server.urls'
 
 WSGI_APPLICATION = 'server.wsgi.application'
 
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "https://www.mozilla.org/"
+LOGIN_REQUIRED_URLS_EXCEPTIONS = (
+    r'/login/.*',
+    r'/logout/.*',
+    r'/oidc/.*',
+    r'/ec2spotmanager/rest/.*',
+    r'/covmanager/rest/.*',
+    r'/crashmanager/rest/.*',
+)
+
+# permissions given to new users by default
+DEFAULT_PERMISSIONS = [
+    'crashmanager.models.User:view_covmanager'
+]
 
 # Database
 # https://docs.djangoproject.com/en/1.6/ref/settings/#databases
@@ -163,12 +188,12 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.6/howto/static-files/
-
+STATIC_ROOT = '/path/to/static/'
 STATIC_URL = '/static/'
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
+        'server.auth.CheckAppPermission',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
     'PAGE_SIZE': 100
@@ -192,7 +217,7 @@ LOGGING = {
             'format': '[%(asctime)s] [%(levelname)s] [%(module)s] [%(process)d] ]%(thread)d]: %(message)s'
         },
         'simple': {
-            'format': '[%(asctime)s] [%(levelname)s] [%(module)s]: %(message)s'
+            'format': '[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s'
         },
     },
     'handlers': {
@@ -218,6 +243,16 @@ LOGGING = {
         'flake8': {
             'level': 'WARNING',
         },
+        'boto': {
+            'handlers': ['ec2spotmanager_logfile'],
+            'propagate': True,
+            'level': 'WARNING',
+        },
+        'laniakea': {
+            'handlers': ['ec2spotmanager_logfile'],
+            'propagate': True,
+            'level': 'INFO',
+        },
         'ec2spotmanager': {
             'handlers': ['ec2spotmanager_logfile'],
             'propagate': True,
@@ -231,6 +266,12 @@ LOGGING = {
 # behave as if we were using HTTPs.
 #SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+# EC2Spotmanager configuration
+# If access keys are None, boto will look for global credentials (~/.aws/credentials or IAM role)
+#
+AWS_ACCESS_KEY_ID = None
+AWS_SECRET_ACCESS_KEY = None
+
 # Crashmanager configuration
 #
 #BUGZILLA_USERNAME = "example@example.com"
@@ -242,6 +283,14 @@ LOGGING = {
 # be created for storing submitted test files.
 TEST_STORAGE = os.path.join(BASE_DIR)
 USERDATA_STORAGE = os.path.join(BASE_DIR)
+
+# This is the directory where signatures.zip will be stored
+SIGNATURE_STORAGE = os.path.join(BASE_DIR)
+
+# Redis configuration
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
+REDIS_DB = 0
 
 # Celery configuration
 # USE_CELERY = True
@@ -273,5 +322,9 @@ USERDATA_STORAGE = os.path.join(BASE_DIR)
 #     'Check EC2SpotManager pools': {
 #         'task': 'ec2spotmanager.cron.check_instance_pools',
 #         'schedule': 60,
+#     },
+#     'Cache EC2 spot market pricing in Redis': {
+#         'task': 'ec2spotmanager.cron.update_prices',
+#         'schedule': 15 * 60,
 #     },
 # }

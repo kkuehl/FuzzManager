@@ -1,3 +1,4 @@
+# coding: utf-8
 '''
 Created on Oct 9, 2014
 
@@ -10,8 +11,9 @@ from FTB.ProgramConfiguration import ProgramConfiguration
 from FTB.Signatures.CrashInfo import CrashInfo
 from FTB.Signatures.CrashSignature import CrashSignature
 from FTB.Signatures.Matchers import StringMatch
-from FTB.Signatures.Symptom import StackFramesSymptom
+from FTB.Signatures.Symptom import OutputSymptom, StackFramesSymptom
 
+from FTB.Signatures.test_CrashInfo import tsanSimpleLeakReport, tsanSimpleRaceReport
 
 testTrace1 = """Program received signal SIGSEGV, Segmentation fault.
 GetObjectAllocKindForCopy (obj=0x7ffff54001b0, nursery=...) at /srv/repos/mozilla-central/js/src/gc/Nursery.cpp:369
@@ -191,6 +193,31 @@ testAsanAccessViolation = """
     #0 0x7ffa9a30c9e6 in nsCSSFrameConstructor::WipeContainingBlock z:\\build\\build\\src\\layout\\base\\nsCSSFrameConstructor.cpp:12715
     #1 0x7ffa9a3051d7 in nsCSSFrameConstructor::ContentAppended z:\\build\\build\\src\\layout\\base\\nsCSSFrameConstructor.cpp:7690
     #2 0x7ffa9a1f0241 in mozilla::RestyleManager::ProcessRestyledFrames z:\\build\\build\\src\\layout\\base\\RestyleManager.cpp:1414
+"""  # noqa
+
+
+testAsanLongTrace = """
+==18896==ERROR: AddressSanitizer: stack-overflow on address 0x7ffcb3422c20 (pc 0x7f12fc7715a8 bp 0x7ffcb3423e90 sp 0x7ffcb3422c20 T0)
+    #0 0x7f12fc7715a7 in nsLineBreaker::AppendText(nsAtom*, unsigned char const*, unsigned int, unsigned int, nsILineBreakSink*) /builds/worker/workspace/build/src/dom/base/nsLineBreaker.cpp
+    #1 0x7f130185dfed in BuildTextRunsScanner::SetupBreakSinksForTextRun(gfxTextRun*, void const*) /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:2653:22
+    #2 0x7f1301852baa in BuildTextRunsScanner::SetupLineBreakerContext(gfxTextRun*) /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:2545:3
+    #3 0x7f1301850b62 in BuildTextRunsScanner::FlushFrames(bool, bool) /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:1679:12
+    #4 0x7f1301861fd7 in BuildTextRuns /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:1624:11
+    #5 0x7f1301861fd7 in nsTextFrame::EnsureTextRun(nsTextFrame::TextRunType, mozilla::gfx::DrawTarget*, nsIFrame*, nsLineList_iterator const*, unsigned int*) /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:2867
+    #6 0x7f13018a5bb0 in nsTextFrame::ReflowText(nsLineLayout&, int, mozilla::gfx::DrawTarget*, mozilla::ReflowOutput&, nsReflowStatus&) /builds/worker/workspace/build/src/layout/generic/nsTextFrame.cpp:9412:5
+    #7 0x7f13017d53bc in nsLineLayout::ReflowFrame(nsIFrame*, nsReflowStatus&, mozilla::ReflowOutput*, bool&) /builds/worker/workspace/build/src/layout/generic/nsLineLayout.cpp:927:7
+    #8 0x7f1301610e7d in nsBlockFrame::ReflowInlineFrame(mozilla::BlockReflowInput&, nsLineLayout&, nsLineList_iterator, nsIFrame*, LineReflowStatus*) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:4158:15
+    #9 0x7f130160f827 in nsBlockFrame::DoReflowInlineFrames(mozilla::BlockReflowInput&, nsLineLayout&, nsLineList_iterator, nsFlowAreaRect&, int&, nsFloatManager::SavedState*, bool*, LineReflowStatus*, bool) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:3958:5
+    #10 0x7f1301606549 in nsBlockFrame::ReflowInlineFrames(mozilla::BlockReflowInput&, nsLineList_iterator, bool*) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:3832:9
+    #11 0x7f13015feaa0 in nsBlockFrame::ReflowLine(mozilla::BlockReflowInput&, nsLineList_iterator, bool*) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:2816:5
+    #12 0x7f13015f4320 in nsBlockFrame::ReflowDirtyLines(mozilla::BlockReflowInput&) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:2352:7
+    #13 0x7f13015ebb34 in nsBlockFrame::Reflow(nsPresContext*, mozilla::ReflowOutput&, mozilla::ReflowInput const&, nsReflowStatus&) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:1225:3
+    #14 0x7f130160cda7 in nsBlockReflowContext::ReflowBlock(mozilla::LogicalRect const&, bool, nsCollapsingMargin&, int, bool, nsLineBox*, mozilla::ReflowInput&, nsReflowStatus&, mozilla::BlockReflowInput&) /builds/worker/workspace/build/src/layout/generic/nsBlockReflowContext.cpp:306:11
+    #15 0x7f1301600e23 in nsBlockFrame::ReflowBlockFrame(mozilla::BlockReflowInput&, nsLineList_iterator, bool*) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:3463:11
+    #16 0x7f13015febf5 in nsBlockFrame::ReflowLine(mozilla::BlockReflowInput&, nsLineList_iterator, bool*) /builds/worker/workspace/build/src/layout/generic/nsBlockFrame.cpp:2813:5
+
+SUMMARY: AddressSanitizer: stack-overflow dom/base/nsLineBreaker.cpp in nsLineBreaker::AppendText(nsAtom*, unsigned char const*, unsigned int, unsigned int, nsILineBreakSink*)
+==18896==ABORTING
 """  # noqa
 
 testSignature1 = '''{"symptoms": [
@@ -406,6 +433,14 @@ testSignatureEmptyCrashAddress = '''{"symptoms": [
 ]}
 '''
 
+testSignatureStackSize = '''{"symptoms": [
+  {
+    "size": "> 15",
+    "type": "stackSize"
+  }
+]}
+'''
+
 
 class SignatureCreateTest(unittest.TestCase):
     def runTest(self):
@@ -604,6 +639,71 @@ class SignatureAsanAccessViolationTest(unittest.TestCase):
         self.assertIn("/ERROR: AddressSanitizer", str(testSig))
         self.assertIn("access\\\\-violation", str(testSig))
         self.assertTrue(isinstance(testSig.symptoms[1], StackFramesSymptom))
+
+
+class SignatureStackSizeTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+        crashInfoPos = CrashInfo.fromRawCrashData([], [], config, auxCrashData=testAsanLongTrace.splitlines())
+
+        # The test signature uses > 15 which was previously interpreted as 0x15
+        # while the test crash data has 16 frames.
+        testSig = CrashSignature(testSignatureStackSize)
+        self.assertTrue(testSig.matches(crashInfoPos))
+
+
+class SignatureGenerationTSanLeakTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+        crashInfo = CrashInfo.fromRawCrashData([], [], config, auxCrashData=tsanSimpleLeakReport.splitlines())
+        testSignature = crashInfo.createCrashSignature()
+
+        self.assertTrue(testSignature.matches(crashInfo))
+
+        found = False
+        for symptom in testSignature.symptoms:
+            if isinstance(symptom, OutputSymptom):
+                self.assertEqual(symptom.src, "crashdata")
+                self.assertEqual(symptom.output.value, "WARNING: ThreadSanitizer: thread leak")
+                found = True
+        self.assertTrue(found, msg="Expected correct OutputSymptom in signature")
+
+
+class SignatureGenerationTSanRaceTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+        crashInfo = CrashInfo.fromRawCrashData([], [], config, auxCrashData=tsanSimpleRaceReport.splitlines())
+        testSignature = crashInfo.createCrashSignature()
+
+        self.assertTrue(testSignature.matches(crashInfo))
+
+        outputSymptoms = []
+
+        for symptom in testSignature.symptoms:
+            if isinstance(symptom, OutputSymptom):
+                self.assertEqual(symptom.src, "crashdata")
+                outputSymptoms.append(symptom)
+
+        self.assertEqual(len(outputSymptoms), 3)
+
+        for stringMatchVal in [
+            "WARNING: ThreadSanitizer: data race",
+            "Write of size 4 at 0x[0-9a-fA-F]+ by thread T1:",
+            "Previous read of size 4 at 0x[0-9a-fA-F]+ by main thread:"
+        ]:
+            found = False
+            for symptom in outputSymptoms:
+                if symptom.output.value == stringMatchVal:
+                    found = True
+            self.assertTrue(found, msg="Couldn't find OutputSymptom with value '%s'" % stringMatchVal)
+
+
+class SignatureMatchWithUnicode(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration('test', 'x86-64', 'linux')
+        crashInfo = CrashInfo.fromRawCrashData(["(Â«f => (generator.throw(f))Â», Â«undefinedÂ»)"], [], config)
+        testSignature = CrashSignature('{"symptoms": [{"src": "stdout", "type": "output", "value": "x"}]}')
+        self.assertFalse(testSignature.matches(crashInfo))
 
 
 if __name__ == "__main__":

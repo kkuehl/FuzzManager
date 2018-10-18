@@ -22,7 +22,7 @@ class CrashEntrySerializer(serializers.ModelSerializer):
     # create these instances first and issue multiple requests in total.
     platform = serializers.CharField(source='platform.name', max_length=63)
     product = serializers.CharField(source='product.name', max_length=63)
-    product_version = serializers.CharField(source='product.version', max_length=63, required=False, allow_blank=True)
+    product_version = serializers.CharField(source='product.version', max_length=127, required=False, allow_blank=True)
     os = serializers.CharField(source='os.name', max_length=63)
     client = serializers.CharField(source='client.name', max_length=255)
     tool = serializers.CharField(source='tool.name', max_length=63)
@@ -116,7 +116,7 @@ class CrashEntrySerializer(serializers.ModelSerializer):
 
 
 class BucketSerializer(serializers.ModelSerializer):
-    bug = serializers.CharField(source='bug.externalId')
+    bug = serializers.CharField(source='bug.externalId', default=None)
     # write_only here means don't try to read it automatically in super().to_representation()
     # size and best_quality are annotations, so must be set manually
     size = serializers.IntegerField(write_only=True)

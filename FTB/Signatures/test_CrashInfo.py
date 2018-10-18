@@ -230,6 +230,34 @@ rbx            0x1      1
 => 0x812bf19 <js::types::TypeObject::addProperty(JSContext*, jsid, js::types::Property**)+121>: shrb   -0x69(%rdx,%rbx,8)
 """  # noqa
 
+gdbCrashAddress4 = """
+received signal SIGILL, Illegal instruction.
+0x000008ab336edd14 in ?? ()
+#0  0x000008ab336edd14 in ?? ()
+#1  0x0000000000554ac4 in Interpret (cx=0xffffffffcc20, state=...) at js/src/vm/Interpreter.cpp:2037
+x0	0x1	1
+sp	0xffffc780	281474976696192
+pc	0x3ef29d14	20513819893012
+cpsr	0x0	0
+fpcsr	void
+fpcr	0x0	0
+=> 0x8ab336edd14:	.inst	0xffff006c ; undefined
+"""  # noqa
+
+gdbCrashAddress5 = """
+Program terminated with signal SIGSEGV, Segmentation fault.
+#0  0x0000000000b49798 in js::gc::TenuredCell::arena (this=<optimized out>) at /home/ubuntu/mozilla-central/js/src/gc/Cell.h:333
+x0	0x9f3f1da0	281473353457056
+x1	0x1d9540	7696583333184
+x2	0x87afa000	281472958177280
+sp	0xa0065000	281473366511616
+pc	0xb49798 <IsAboutToBeFinalizedInternal<JSObject>(JSObject**)+56>
+cpsr	0x20000000	536870912
+fpcsr	void
+fpcr	0x0	0
+=> 0xb49798 <IsAboutToBeFinalizedInternal<JSObject>(JSObject**)+56>:	ldrb	w2, [x2,#20]
+"""  # noqa
+
 gdbSampleTrace1 = """
 [New Thread 14711]
 [Thread debugging using libthread_db enabled]
@@ -519,6 +547,38 @@ rip            0x7ff7f20c1f81   0x7ff7f20c1f81
 => 0x83c4a4b <js::ToPrimitiveSlow(JSContext*, JSType, JS::MutableHandle<JS::Value>)+219>:       callq  *0xa8(%rax)
 """
 
+gdbRegressionTrace12 = """
+Program terminated with signal SIGSEGV, Segmentation fault.
+#0  0x0000000000bf9000 in js::SavedStacks::insertFrames(JSContext*, js::FrameIter&, JS::MutableHandle<js::SavedFrame*>, mozilla::Variant<JS::AllFrames, JS::MaxFrames, JS::FirstSubsumedFrame>&&) (this=this@entry=0x7fc3c234e100, cx=cx@entry=0x7fc3c2316000, iter=..., frame=..., capture=capture@entry=<unknown type in /home/ubuntu/build/dist/bin/js, CU 0x569a418, DIE 0x58e7398>) at js/src/vm/SavedStacks.cpp:1361
+#1  0x0000000000bf94c6 in js::SavedStacks::saveCurrentStack(JSContext*, JS::MutableHandle<js::SavedFrame*>, mozilla::Variant<JS::AllFrames, JS::MaxFrames, JS::FirstSubsumedFrame>&&) (this=0x7fc3c234e100, cx=cx@entry=0x7fc3c2316000, frame=..., capture=capture@entry=<unknown type in /home/ubuntu/build/dist/bin/js, CU 0x569a418, DIE 0x58e88cf>) at vm/SavedStacks.cpp:1225
+#2  0x00000000009dedfa in JS::CaptureCurrentStack(JSContext*, JS::MutableHandle<JSObject*>, mozilla::Variant<JS::AllFrames, JS::MaxFrames, JS::FirstSubsumedFrame>&&) (cx=0x7fc3c2316000, stackp=..., capture=<unknown type in /home/ubuntu/build/dist/bin/js, CU 0x3d1dbc6, DIE 0x3edf2a4>) at js/src/jsapi.cpp:7755
+#3  0x00000000009deedb in CaptureStack (cx=<optimized out>, stack=...) at js/src/jsexn.cpp:369
+""" # noqa
+
+gdbRegressionTrace13 = """
+received signal SIGSEGV, Segmentation fault.
+0x56df6483 in JSScript::global (this=0xe5e5e5e5) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/vm/JSScript-inl.h:149
+#0  0x56df6483 in JSScript::global (this=0xe5e5e5e5) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/vm/JSScript-inl.h:149
+#1  js::AbstractFramePtr::global (this=0xffffc0bc) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/vm/Stack-inl.h:747
+#2  js::Debugger::forEachDebuggerFrame<js::Debugger::inFrameMaps(js::AbstractFramePtr)::<lambda(js::DebuggerFrame*)> >(js::AbstractFramePtr, js::Debugger::<lambda(js::DebuggerFrame*)>) (frame=..., fn=..., fn@entry=...) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/vm/Debugger.cpp:2815
+#3  0x56df67d0 in js::Debugger::inFrameMaps (frame=...) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/vm/Debugger.cpp:7164
+#4  0x56b1f31a in js::jit::HandleExceptionIon (overrecursed=0xffffc19b, rfe=0xffffc4b8, frame=..., cx=0xf6e1b800) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/jit/JitFrames.cpp:215
+#5  js::jit::HandleException (rfe=<optimized out>) at /srv/jenkins/jobs/mozilla-central-clone/workspace/js/src/jit/JitFrames.cpp:710
+#6  0xee21eaa3 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+eax	0xe5e5e5e5	-437918235
+ebx	0xec5fd970	-329262736
+ecx	0x3	3
+edx	0xffffc0bc	-16196
+esi	0xf6e1b800	-152979456
+edi	0x578beff4	1468788724
+ebp	0xffffc0f8	4294951160
+esp	0xffffc084	4294951044
+eip	0x56df6483 <js::Debugger::forEachDebuggerFrame<js::Debugger::inFrameMaps(js::AbstractFramePtr)::<lambda(js::DebuggerFrame*)> >(js::AbstractFramePtr, js::Debugger::<lambda(js::DebuggerFrame*)>)+67>
+=> 0x56df6483 <js::Debugger::forEachDebuggerFrame<js::Debugger::inFrameMaps(js::AbstractFramePtr)::<lambda(js::DebuggerFrame*)> >(js::AbstractFramePtr, js::Debugger::<lambda(js::DebuggerFrame*)>)+67>:	pushl  0x10(%eax)
+   0x56df6486 <js::Debugger::forEachDebuggerFrame<js::Debugger::inFrameMaps(js::AbstractFramePtr)::<lambda(js::DebuggerFrame*)> >(js::AbstractFramePtr, js::Debugger::<lambda(js::DebuggerFrame*)>)+70>:	call   0x568893f0 <JS::Realm::maybeGlobal() const>
+""" # noqa
+
 rustSampleTrace1 = """
 thread 'StyleThread#2' panicked at 'assertion failed: self.get_data().is_some()', /home/worker/workspace/build/src/servo/components/style/gecko/wrapper.rs:976
 stack backtrace:
@@ -604,10 +664,10 @@ OS|Windows NT|10.0.14393
 CPU|amd64|family 6 model 94 stepping 3|4
 GPU|||
 Crash|EXCEPTION_ILLEGAL_INSTRUCTION|0x7ffc41f2f276|36
-36|0|xul.dll|std::panicking::rust_panic_with_hook|git:github.com/rust-lang/rust:src/libstd/panicking.rs:0ade339411587887bf01bcfa2e9ae4414c8900d4|555|0x41
-36|1|xul.dll|std::panicking::begin_panic<&str>|git:github.com/rust-lang/rust:src/libstd/panicking.rs:0ade339411587887bf01bcfa2e9ae4414c8900d4|511|0x12
-36|2|xul.dll|atomic_refcell::AtomicBorrowRef::do_panic|hg:hg.mozilla.org/mozilla-central:third_party/rust/atomic_refcell/src/lib.rs:37b95547f0d2|161|0x18
-36|3|xul.dll|style::values::specified::color::{{impl}}::to_computed_value|hg:hg.mozilla.org/mozilla-central:servo/components/style/values/specified/color.rs:37b95547f0d2|288|0xc
+36|0|xul.dll|std::panicking::rust_panic_with_hook::h4d68aac0b79bfb98|git:github.com/rust-lang/rust:src/libstd/panicking.rs:0ade339411587887bf01bcfa2e9ae4414c8900d4|555|0x41
+36|1|xul.dll|std::panicking::begin_panic<&str>::h4d68aac0b79bfb98|git:github.com/rust-lang/rust:src/libstd/panicking.rs:0ade339411587887bf01bcfa2e9ae4414c8900d4|511|0x12
+36|2|xul.dll|atomic_refcell::AtomicBorrowRef::do_panic::h4d68aac0b79bfb98|hg:hg.mozilla.org/mozilla-central:third_party/rust/atomic_refcell/src/lib.rs:37b95547f0d2|161|0x18
+36|3|xul.dll|style::values::specified::color::{{impl}}::to_computed_value::h4d68aac0b79bfb98|hg:hg.mozilla.org/mozilla-central:servo/components/style/values/specified/color.rs:37b95547f0d2|288|0xc
 0|0|ntdll.dll|AslpFilePartialViewFree|||0x36808
 0|1|||||0xcd07ffd740
 0|2|KERNELBASE.dll|FSPErrorMessages::CMessageHashVectorBuilder::GetEndIndexHash(unsigned short const *)|||0x38
@@ -681,6 +741,42 @@ Crash|SIGSEGV|0x40|34
 0|1|libc-2.23.so||||0xf42b2
 0|2|libxul.so||||0x43ebda
 """
+
+lsanTraceLeakDetected = """
+=================================================================
+==6148==ERROR: LeakSanitizer: detected memory leaks
+
+The 1 top leak(s):
+Direct leak of 232 byte(s) in 1 object(s) allocated from:
+    #0 0x4c1c93 in malloc /builds/asan_malloc_linux.cc:88:3
+    #1 0x4f26fd in moz_xmalloc /builds/mozalloc.cpp:70:17
+    #2 0x7fe6cdf7081f in operator new /builds/mozalloc.h:156:12
+    #3 0x7fe6cdf7081f in mozilla::net::nsStandardURL::StartClone() /builds/nsStandardURL.cpp:2356
+"""
+
+tsanSimpleLeakReport = """
+WARNING: ThreadSanitizer: thread leak (pid=9509)
+  Thread T1 (tid=0, finished) created at:
+    #0 pthread_create tsan_interceptors.cc:683 (exe+0x00000001fb33)
+    #1 main thread_leak3.c:10 (exe+0x000000003c7e)
+"""  # noqa
+
+tsanSimpleRaceReport = """
+WARNING: ThreadSanitizer: data race (pid=9337)
+  Write of size 4 at 0x7fe3c3075190 by thread T1:
+    #0 foo1() simple_stack2.cc:9 (exe+0x000000003c9a)
+    #1 bar1() simple_stack2.cc:16 (exe+0x000000003ce4)
+    #2 Thread1(void*) simple_stack2.cc:34 (exe+0x000000003d99)
+
+  Previous read of size 4 at 0x7fe3c3075190 by main thread:
+    #0 foo2() simple_stack2.cc:20 (exe+0x000000003d0c)
+    #1 bar2() simple_stack2.cc:29 (exe+0x000000003d74)
+    #2 main simple_stack2.cc:41 (exe+0x000000003ddb)
+
+  Thread T1 (tid=9338, running) created at:
+    #0 pthread_create tsan_interceptors.cc:683 (exe+0x00000000de83)
+    #1 main simple_stack2.cc:40 (exe+0x000000003dd6)
+"""  # noqa
 
 
 class ASanParserTestAccessViolation(unittest.TestCase):
@@ -850,10 +946,14 @@ class GDBParserTestCrashAddress(unittest.TestCase):
         crashInfo1 = GDBCrashInfo([], gdbCrashAddress1.splitlines(), config)
         crashInfo2 = GDBCrashInfo([], gdbCrashAddress2.splitlines(), config)
         crashInfo3 = GDBCrashInfo([], gdbCrashAddress3.splitlines(), config)
+        crashInfo4 = GDBCrashInfo([], gdbCrashAddress4.splitlines(), config)
+        crashInfo5 = GDBCrashInfo([], gdbCrashAddress5.splitlines(), config)
 
         self.assertEqual(crashInfo1.crashAddress, 0x1)
-        self.assertEqual(crashInfo2.crashAddress, None)
+        self.assertEqual(crashInfo2.crashAddress, 0x0)
         self.assertEqual(crashInfo3.crashAddress, 0xffffffffffffffa0)
+        self.assertEqual(crashInfo4.crashAddress, 0x3ef29d14)
+        self.assertEqual(crashInfo5.crashAddress, 0x87afa014)
 
 
 class GDBParserTestCrashAddressSimple(unittest.TestCase):
@@ -998,6 +1098,31 @@ class GDBParserTestCrashAddressRegression11(unittest.TestCase):
         crashInfo11 = CrashInfo.fromRawCrashData([], [], config, gdbRegressionTrace11.splitlines())
         self.assertEqual(crashInfo11.crashInstruction, "callq  *0xa8(%rax)")
         self.assertEqual(crashInfo11.crashAddress, 0x7ff7f2091032)
+
+
+class GDBParserTestCrashAddressRegression12(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+
+        crashInfo12 = CrashInfo.fromRawCrashData([], [], config, gdbRegressionTrace12.splitlines())
+        self.assertEqual(crashInfo12.backtrace[0], "js::SavedStacks::insertFrames")
+        self.assertEqual(crashInfo12.backtrace[1], "js::SavedStacks::saveCurrentStack")
+        self.assertEqual(crashInfo12.backtrace[2], "JS::CaptureCurrentStack")
+        self.assertEqual(crashInfo12.backtrace[3], "CaptureStack")
+
+
+class GDBParserTestCrashAddressRegression13(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86", "linux")
+
+        crashInfo13 = CrashInfo.fromRawCrashData([], [], config, gdbRegressionTrace13.splitlines())
+        self.assertEqual(crashInfo13.backtrace[0], "JSScript::global")
+        self.assertEqual(crashInfo13.backtrace[1], "js::AbstractFramePtr::global")
+        self.assertEqual(crashInfo13.backtrace[5], "js::jit::HandleException")
+        self.assertEqual(crashInfo13.backtrace[6], "??")
+
+        self.assertEqual(crashInfo13.crashInstruction, "pushl  0x10(%eax)")
+        self.assertEqual(crashInfo13.crashAddress, 0xe5e5e5f5)
 
 
 class CrashSignatureOutputTest(unittest.TestCase):
@@ -2655,6 +2780,75 @@ class MinidumpModuleInStackTest(unittest.TestCase):
         crashInfo = CrashInfo.fromRawCrashData([], [], config, minidumpSwrast.splitlines())
         self.assertEqual(crashInfo.backtrace[0], "??")
         self.assertEqual(crashInfo.backtrace[1], "swrast_dri.so+0x470ecc")
+
+
+class LSanParserTestLeakDetected(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+
+        crashInfo = CrashInfo.fromRawCrashData([], [], config, lsanTraceLeakDetected.splitlines())
+        self.assertEqual(crashInfo.createShortSignature(), ("LeakSanitizer: [@ malloc]"))
+        self.assertEqual(len(crashInfo.backtrace), 4)
+        self.assertEqual(crashInfo.backtrace[0], "malloc")
+        self.assertEqual(crashInfo.backtrace[1], "moz_xmalloc")
+        self.assertEqual(crashInfo.backtrace[2], "operator new")
+        self.assertEqual(crashInfo.backtrace[3], "mozilla::net::nsStandardURL::StartClone")
+        self.assertIsNone(crashInfo.crashAddress)
+
+
+class TSanParserSimpleLeakTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+
+        crashInfo = CrashInfo.fromRawCrashData([], [], config, tsanSimpleLeakReport.splitlines())
+
+        self.assertEqual(crashInfo.createShortSignature(), ("ThreadSanitizer: thread leak [@ pthread_create]"))
+
+        self.assertEqual(len(crashInfo.backtrace), 2)
+        self.assertEqual(crashInfo.backtrace[0], "pthread_create")
+        self.assertEqual(crashInfo.backtrace[1], "main")
+
+        self.assertEqual(crashInfo.crashInstruction, None)
+        self.assertEqual(crashInfo.crashAddress, None)
+
+
+class TSanParserSimpleRaceTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+
+        crashInfo = CrashInfo.fromRawCrashData([], [], config, tsanSimpleRaceReport.splitlines())
+
+        self.assertEqual(crashInfo.createShortSignature(), ("ThreadSanitizer: data race [@ foo1] vs. [@ foo2]"))
+
+        self.assertEqual(len(crashInfo.backtrace), 8)
+        self.assertEqual(crashInfo.backtrace[0], "foo1")
+        self.assertEqual(crashInfo.backtrace[1], "bar1")
+        self.assertEqual(crashInfo.backtrace[2], "Thread1")
+        self.assertEqual(crashInfo.backtrace[3], "foo2")
+        self.assertEqual(crashInfo.backtrace[4], "bar2")
+
+        self.assertEqual(crashInfo.crashInstruction, None)
+        self.assertEqual(crashInfo.crashAddress, None)
+
+
+class TSanParserTest(unittest.TestCase):
+    def runTest(self):
+        config = ProgramConfiguration("test", "x86-64", "linux")
+
+        with open(os.path.join(CWD, 'tsan-report.txt'), 'r') as f:
+            crashInfo = CrashInfo.fromRawCrashData([], [], config, f.read().splitlines())
+
+        self.assertEqual(crashInfo.createShortSignature(), ("ThreadSanitizer: data race "
+                                                            "[@ js::ProtectedData<js::CheckMainThread"
+                                                            "<(js::AllowedHelperThread)0>, unsigned long>::operator++] "
+                                                            "vs. [@ js::gc::GCRuntime::majorGCCount]"))
+
+        self.assertEqual(len(crashInfo.backtrace), 146)
+        self.assertEqual(crashInfo.backtrace[1], "js::gc::GCRuntime::incMajorGcNumber")
+        self.assertEqual(crashInfo.backtrace[5], "js::gc::GCRuntime::gcIfNeededAtAllocation")
+
+        self.assertEqual(crashInfo.crashInstruction, None)
+        self.assertEqual(crashInfo.crashAddress, None)
 
 
 if __name__ == "__main__":

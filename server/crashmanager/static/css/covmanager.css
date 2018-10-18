@@ -82,6 +82,14 @@
 }
 
 /*
+ * Collection browser
+ */
+
+.collection-selected {
+  background: rgba(240, 130, 15, 0.3);
+}
+
+/*
  * Spinner
  */
 
@@ -101,6 +109,14 @@
   border-left: 1.1em solid #000;
   transform: translateZ(0);
   animation: load8 1.1s infinite linear;
+}
+
+.loader-msg {
+  margin: auto;
+  width: 50%;
+  text-align: center;
+  font-size: 16px;
+  padding: 3px;
 }
 
 @keyframes load8 {

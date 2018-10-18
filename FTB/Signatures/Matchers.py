@@ -61,6 +61,11 @@ class StringMatch():
                     raise RuntimeError("Unknown match operator specified: %s" % matchType)
 
     def matches(self, val):
+        if isinstance(val, bytes):
+            # If the input is not already unicode, try to interpret it as UTF-8
+            # If there are errors, replace them with U+FFFD so we neither raise nor false positive.
+            val = val.decode("utf-8", errors="replace")
+
         if self.isPCRE:
             return self.compiledValue.search(val) is not None
         else:
@@ -110,7 +115,9 @@ class NumberMatch():
                         raise RuntimeError("Unknown match operator specified: %s" % matchType)
 
                 try:
-                    self.value = int(numberMatchComponents[numIdx], 16)
+                    value = numberMatchComponents[numIdx]
+                    base = 16 if value.startswith("0x") else 10
+                    self.value = int(numberMatchComponents[numIdx], base)
                 except ValueError:
                     raise RuntimeError("Invalid number specified: %s" % numberMatchComponents[numIdx])
             else:

@@ -20,6 +20,10 @@ from __future__ import print_function
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 from boto.utils import parse_ts as boto_parse_ts
+
+from tempfile import mkstemp
+from zipfile import ZipFile, ZIP_DEFLATED
+
 import hashlib
 import os
 import platform
@@ -31,7 +35,7 @@ import time
 
 
 class S3Manager():
-    def __init__(self, bucket_name, project_name):
+    def __init__(self, bucket_name, project_name, build_project_name=None, zip_name="build.zip"):
         '''
         @type bucket_name: String
         @param bucket_name: Name of the S3 bucket to use
@@ -44,6 +48,8 @@ class S3Manager():
         '''
         self.bucket_name = bucket_name
         self.project_name = project_name
+        self.build_project_name = build_project_name
+        self.zip_name = zip_name
 
         self.connection = S3Connection()
         self.bucket = self.connection.get_bucket(self.bucket_name)
@@ -51,11 +57,17 @@ class S3Manager():
         # Define some path constants that define the folder structure on S3
         self.remote_path_queues = "%s/queues/" % self.project_name
         self.remote_path_corpus = "%s/corpus/" % self.project_name
-        self.remote_path_build = "%s/build.zip" % self.project_name
+        self.remote_path_corpus_bundle = "%s/corpus.zip" % self.project_name
 
-        # Memorize which files we have uploaded before, so we never attempt to
-        # re-upload them to a different queue.
-        self.uploaded_files = []
+        if self.build_project_name:
+            self.remote_path_build = "%s/%s" % (self.build_project_name, self.zip_name)
+        else:
+            self.remote_path_build = "%s/%s" % (self.project_name, self.zip_name)
+
+        # Memorize which files we have uploaded/downloaded before, so we never attempt to
+        # re-upload them to a different queue or re-download them after a local merge.
+        self.uploaded_files = set()
+        self.downloaded_files = set()
 
     def upload_libfuzzer_queue_dir(self, base_dir, corpus_dir, original_corpus):
         '''
@@ -75,7 +87,7 @@ class S3Manager():
         upload_files = [x for x in os.listdir(corpus_dir) if x not in original_corpus and x not in self.uploaded_files]
 
         # Memorize files selected for upload
-        self.uploaded_files.extend(upload_files)
+        self.uploaded_files.update(upload_files)
 
         cmdline_file = os.path.join(base_dir, "cmdline")
 
@@ -106,13 +118,21 @@ class S3Manager():
                 # If the file is in a queue marked as closed, ignore it
                 continue
 
-            dest_file = os.path.join(corpus_dir, os.path.basename(remote_key.name))
+            basename = os.path.basename(remote_key.name)
+
+            if basename in self.downloaded_files or basename in self.uploaded_files:
+                # If we ever downloaded this file before, ignore it
+                continue
+
+            dest_file = os.path.join(corpus_dir, basename)
             if os.path.exists(dest_file):
                 # If the file already exists locally, ignore it
                 continue
 
             print("Syncing from queue %s: %s" % (queue_name, filename))
             remote_key.get_contents_to_filename(dest_file)
+
+            self.downloaded_files.add(basename)
 
     def upload_afl_queue_dir(self, base_dir, new_cov_only=True):
         '''
@@ -322,7 +342,7 @@ class S3Manager():
 
         os.mkdir(build_dir)
 
-        zip_dest = os.path.join(build_dir, "build.zip")
+        zip_dest = os.path.join(build_dir, self.zip_name)
 
         remote_key = Key(self.bucket)
         remote_key.name = self.remote_path_build
@@ -363,6 +383,28 @@ class S3Manager():
         if not os.path.exists(corpus_dir):
             os.mkdir(corpus_dir)
 
+        if not random_subset_size:
+            # If we are not instructed to download only a sample of the corpus,
+            # we can try and look for a corpus bundle (zip file) for faster download.
+            remote_key = Key(self.bucket)
+            remote_key.name = self.remote_path_corpus_bundle
+            if remote_key.exists():
+                (zip_fd, zip_dest) = mkstemp(prefix="libfuzzer-s3-corpus")
+                print("Found corpus bundle, downloading...")
+
+                try:
+                    remote_key.get_contents_to_filename(zip_dest)
+
+                    with ZipFile(zip_dest, "r") as zip_file:
+                        if zip_file.testzip():
+                            # Warn, but don't throw, we can try to download the corpus directly
+                            print("Bad CRC for downloaded zipfile %s" % zip_dest, file=sys.stderr)
+                        else:
+                            zip_file.extractall(corpus_dir)
+                            return
+                finally:
+                    os.remove(zip_dest)
+
         remote_keys = list(self.bucket.list(self.remote_path_corpus))
 
         if random_subset_size and len(remote_keys) > random_subset_size:
@@ -390,6 +432,18 @@ class S3Manager():
         if not test_files:
             print("Error: Corpus is empty, refusing upload.", file=sys.stderr)
             return
+
+        # Make a zip bundle and upload it
+        (zip_fd, zip_dest) = mkstemp(prefix="libfuzzer-s3-corpus")
+        zip_file = ZipFile(zip_dest, 'w', ZIP_DEFLATED)
+        for test_file in test_files:
+            zip_file.write(os.path.join(corpus_dir, test_file), arcname=test_file)
+        zip_file.close()
+        remote_key = Key(self.bucket)
+        remote_key.name = self.remote_path_corpus_bundle
+        print("Uploading file %s -> %s" % (zip_dest, remote_key.name))
+        remote_key.set_contents_from_filename(zip_dest)
+        os.remove(zip_dest)
 
         remote_path = self.remote_path_corpus
         remote_files = [key.name.replace(remote_path, "", 1) for key in list(self.bucket.list(remote_path))]
@@ -474,4 +528,8 @@ class S3Manager():
             remote_key = Key(self.bucket)
             remote_key.name = remote_path + os.path.basename(upload_file)
             print("Uploading file %s -> %s" % (upload_file, remote_key.name))
-            remote_key.set_contents_from_filename(upload_file)
+            try:
+                remote_key.set_contents_from_filename(upload_file)
+            except IOError:
+                # Newer libFuzzer can delete files from the corpus if it finds a shorter version in the same run.
+                pass

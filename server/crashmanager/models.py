@@ -1,11 +1,13 @@
 from django.conf import settings
-from django.contrib.auth.models import User as DjangoUser
+from django.contrib.auth.models import User as DjangoUser, Permission
+from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.db.models.signals import post_delete, post_save
 from django.dispatch.dispatcher import receiver
 from django.utils import timezone
 import json
+import logging
 import re
 
 import six
@@ -93,6 +95,7 @@ class Bug(models.Model):
 class Bucket(models.Model):
     bug = models.ForeignKey(Bug, blank=True, null=True)
     signature = models.TextField()
+    optimizedSignature = models.TextField(blank=True, null=True)
     shortDescription = models.CharField(max_length=1023, blank=True)
     frequent = models.BooleanField(blank=False, default=False)
     permanent = models.BooleanField(blank=False, default=False)
@@ -100,12 +103,102 @@ class Bucket(models.Model):
     def getSignature(self):
         return CrashSignature(self.signature)
 
+    def getOptimizedSignature(self):
+        return CrashSignature(self.optimizedSignature)
+
     def save(self, *args, **kwargs):
         # Sanitize signature line endings so we end up with the same hash
         # TODO: We might want to just parse the JSON here, and re-serialize
         # it to a canonical string representation.
         self.signature = self.signature.replace(r"\r\n", r"\n")
+
+        # TODO: We could reset this only when we actually modify the signature,
+        # but this would require fetching the old signature from the database again.
+        keepOptimized = kwargs.pop('keepOptimized', False)
+        if not keepOptimized:
+            self.optimizedSignature = None
+
         super(Bucket, self).save(*args, **kwargs)
+
+    def optimizeSignature(self, unbucketed_entries):
+        buckets = Bucket.objects.all()
+
+        signature = self.getSignature()
+        if signature.matchRequiresTest():
+            unbucketed_entries.select_related("testcase")
+
+        requiredOutputs = signature.getRequiredOutputSources()
+        entries = CrashEntry.deferRawFields(unbucketed_entries, requiredOutputs)
+
+        optimizedSignature = None
+        matchingEntries = []
+
+        # Avoid hitting the database multiple times when looking for the first
+        # entry of a bucket. Keeping these in memory is less expensive.
+        firstEntryPerBucketCache = {}
+
+        for entry in entries:
+            entry.crashinfo = entry.getCrashInfo(attachTestcase=signature.matchRequiresTest(),
+                                                 requiredOutputSources=requiredOutputs)
+
+            # For optimization, disregard any issues that directly match since those could be
+            # incoming new issues and we don't want these to block the optimization.
+            if signature.matches(entry.crashinfo):
+                continue
+
+            optimizedSignature = signature.fit(entry.crashinfo)
+            if optimizedSignature:
+                # We now try to determine how this signature will behave in other buckets
+                # If the signature matches lots of other buckets as well, it is likely too
+                # broad and we should not consider it (or later rate it worse than others).
+                matchesInOtherBuckets = False
+                nonMatchesInOtherBuckets = 0  # noqa
+                otherMatchingBucketIds = []  # noqa
+                for otherBucket in buckets:
+                    if otherBucket.pk == self.pk:
+                        continue
+
+                    if self.bug and otherBucket.bug and self.bug.pk == otherBucket.bug.pk:
+                        # Allow matches in other buckets if they are both linked to the same bug
+                        continue
+
+                    if otherBucket.pk not in firstEntryPerBucketCache:
+                        c = CrashEntry.objects.filter(bucket=otherBucket).select_related("product", "platform", "os")
+                        c = CrashEntry.deferRawFields(c, requiredOutputs)
+                        c = c.first()
+                        firstEntryPerBucketCache[otherBucket.pk] = c
+                        if c:
+                            # Omit testcase for performance reasons for now
+                            firstEntryPerBucketCache[otherBucket.pk] = c.getCrashInfo(
+                                attachTestcase=False,
+                                requiredOutputSources=requiredOutputs
+                            )
+
+                    firstEntryCrashInfo = firstEntryPerBucketCache[otherBucket.pk]
+                    if firstEntryCrashInfo:
+                        # Omit testcase for performance reasons for now
+                        if optimizedSignature.matches(firstEntryCrashInfo):
+                            matchesInOtherBuckets = True
+                            break
+
+                if matchesInOtherBuckets:
+                    # Reset, we don't actually have an optimized signature if it's matching
+                    # some other bucket as well.
+                    optimizedSignature = None
+                else:
+                    for otherEntry in entries:
+                        otherEntry.crashinfo = otherEntry.getCrashInfo(attachTestcase=False,
+                                                                       requiredOutputSources=requiredOutputs)
+                        if optimizedSignature.matches(otherEntry.crashinfo):
+                            matchingEntries.append(otherEntry)
+
+                    # Fallback for when the optimization algorithm failed for some reason
+                    if not matchingEntries:
+                        optimizedSignature = None
+
+                    break
+
+        return (optimizedSignature, matchingEntries)
 
 
 class CrashEntry(models.Model):
@@ -316,6 +409,13 @@ class BugzillaTemplate(models.Model):
 
 
 class User(models.Model):
+    class Meta:
+        permissions = (
+            ("view_crashmanager", "Can see CrashManager app"),
+            ("view_covmanager", "Can see CovManager app"),
+            ("view_ec2spotmanager", "Can see EC2SpotManager app"),
+        )
+
     user = models.OneToOneField(DjangoUser)
     # Explicitly do not store this as a ForeignKey to e.g. BugzillaTemplate
     # because the bug provider has to decide how to interpret this ID.
@@ -332,6 +432,20 @@ class User(models.Model):
             user.restricted = True
             user.save()
         return (user, created)
+
+
+@receiver(post_save, sender=DjangoUser)
+def add_default_perms(sender, instance, created, **kwargs):
+    if created:
+        log = logging.getLogger('crashmanager')
+        for perm in getattr(settings, 'DEFAULT_PERMISSIONS', []):
+            model, perm = perm.split(':', 1)
+            module, model = model.rsplit('.', 1)
+            module = __import__(module, globals(), locals(), [model], 0)  # from module import model
+            content_type = ContentType.objects.get_for_model(getattr(module, model))
+            perm = Permission.objects.get(content_type=content_type, codename=perm)
+            instance.user_permissions.add(perm)
+            log.info('user %s added permission %s:%s', instance.username, model, perm)
 
 
 class BucketWatch(models.Model):
